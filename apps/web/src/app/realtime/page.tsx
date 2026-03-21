@@ -13,7 +13,7 @@ interface Detection {
   category: string;
 }
 
-type Status = "idle" | "connecting" | "scanning" | "error";
+type Status = "idle" | "connecting" | "scanning" | "detected" | "error";
 
 const REGIONS = [
   { value: "EUR", label: "Europe" },
@@ -41,12 +41,11 @@ const INTERVALS = [
   { label: "3 fps  (fastest)", ms: 333 },
 ];
 
-const WS_URL =
-  process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3002";
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3002";
 
 export default function RealtimePage() {
   const [status, setStatus] = useState<Status>("idle");
-  const [detections, setDetections] = useState<Detection[]>([]);
+  const [result, setResult] = useState<Detection | null>(null);
   const [region, setRegion] = useState("EUR");
   const [intervalMs, setIntervalMs] = useState(1000);
   const [errorMsg, setErrorMsg] = useState("");
@@ -56,6 +55,7 @@ export default function RealtimePage() {
   const wsRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const detectedRef = useRef(false);
 
   const teardown = useCallback(() => {
     if (intervalRef.current) {
@@ -81,8 +81,9 @@ export default function RealtimePage() {
   useEffect(() => () => teardown(), [teardown]);
 
   async function startScanning() {
-    setDetections([]);
+    setResult(null);
     setErrorMsg("");
+    detectedRef.current = false;
     setStatus("connecting");
 
     let stream: MediaStream;
@@ -116,8 +117,11 @@ export default function RealtimePage() {
         if (msg.type === "ready") {
           setStatus("scanning");
           startFrameCapture(ws, intervalMs);
-        } else if (msg.type === "detection") {
-          setDetections((prev) => [msg.data as Detection, ...prev].slice(0, 20));
+        } else if (msg.type === "detection" && !detectedRef.current) {
+          detectedRef.current = true;
+          setResult(msg.data as Detection);
+          setStatus("detected");
+          teardown();
         } else if (msg.type === "error") {
           setErrorMsg(msg.message || "Server error");
           setStatus("error");
@@ -291,7 +295,7 @@ export default function RealtimePage() {
             >
               Start Camera
             </button>
-          ) : (
+          ) : status === "connecting" || status === "scanning" ? (
             <button
               type="button"
               onClick={stopAll}
@@ -299,60 +303,72 @@ export default function RealtimePage() {
             >
               Stop
             </button>
-          )}
+          ) : null}
         </div>
 
-        {detections.length > 0 && (
-          <div className="mt-8 space-y-3">
-            <p className="text-xs font-medium uppercase tracking-widest text-gray-500">
-              Detections
-            </p>
-            {detections.map((d, i) => {
-              const parsedColor = parseColorString(d.color);
-              return (
-                <div
-                  key={`${d.plate}-${d.timestamp}-${i}`}
-                  className="rounded-xl border border-gray-700 bg-black p-4 flex items-center justify-between gap-4"
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <span className="font-mono text-xl font-bold tracking-widest text-white bg-black px-3 py-1 rounded-lg border border-gray-700">
-                        {d.plate}
-                      </span>
-                      {d.country && (
-                        <span className="text-xs font-mono text-gray-500 bg-gray-900 px-2 py-1 rounded">
-                          {d.country}
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-300">
-                      {(d.make || d.model) && (
-                        <span>{[d.make, d.model].filter(Boolean).join(" ")}</span>
-                      )}
-                      {d.category && (
-                        <span className="rounded-full bg-gray-700 px-2.5 py-0.5 text-xs font-medium uppercase tracking-wide text-white">
-                          {d.category}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-end gap-2 shrink-0">
-                    {parsedColor && (
-                      <div
-                        className="h-5 w-5 rounded-full border border-gray-600 ring-2 ring-gray-800"
-                        style={{ backgroundColor: `rgb(${parsedColor.r},${parsedColor.g},${parsedColor.b})` }}
-                      />
-                    )}
-                    {d.timestamp && (
-                      <span className="text-xs text-gray-600 font-mono">{d.timestamp}</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+        {status === "detected" && result && (
+          <div className="mt-6 space-y-4">
+            <ResultCard detection={result} />
+            <button
+              type="button"
+              onClick={startScanning}
+              className="w-full rounded-xl bg-white px-6 py-3.5 text-sm font-semibold text-black hover:bg-gray-200 active:scale-[0.99] transition-all"
+            >
+              Next Scan
+            </button>
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function ResultCard({ detection: d }: { detection: Detection }) {
+  const parsedColor = parseColorString(d.color);
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl p-6">
+      <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent pointer-events-none" />
+      <div className="relative space-y-5">
+        <div className="flex items-center gap-2">
+          <svg className="h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+          <span className="text-xs font-medium uppercase tracking-widest text-gray-400">Detected</span>
+        </div>
+
+        <div className="flex items-center gap-4 flex-wrap">
+          <span className="font-mono text-3xl font-bold tracking-[0.2em] text-white border border-gray-600 rounded-xl px-4 py-2 bg-black/40">
+            {d.plate}
+          </span>
+          {d.country && (
+            <span className="font-mono text-sm text-gray-400 bg-black/40 border border-gray-700 px-3 py-1.5 rounded-lg">
+              {d.country}
+            </span>
+          )}
+          {parsedColor && (
+            <div
+              className="h-6 w-6 rounded-full border border-gray-600 ring-2 ring-gray-800 shrink-0"
+              style={{ backgroundColor: `rgb(${parsedColor.r},${parsedColor.g},${parsedColor.b})` }}
+            />
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+          {d.make && <Field label="Make" value={d.make} />}
+          {d.model && <Field label="Model" value={d.model} />}
+          {d.category && <Field label="Category" value={d.category} />}
+          {d.timestamp && <Field label="Timestamp" value={d.timestamp} mono />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div>
+      <p className="text-xs text-gray-500 uppercase tracking-wider mb-0.5">{label}</p>
+      <p className={["text-sm text-white", mono ? "font-mono" : ""].join(" ")}>{value}</p>
     </div>
   );
 }
