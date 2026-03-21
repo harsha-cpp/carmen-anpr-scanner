@@ -183,9 +183,6 @@ export default function RealtimePage() {
           <h1 className="text-4xl font-bold tracking-tight text-white">
             Carmen ANPR Scanner
           </h1>
-          <p className="mt-2 text-gray-400 text-sm">
-            Automatic Number Plate Recognition powered by Carmen Video SDK
-          </p>
         </header>
 
         <nav className="mb-8 flex justify-center gap-1 rounded-xl border border-gray-800 bg-gray-950 p-1">
