@@ -139,7 +139,10 @@ wss.on("connection", (ws) => {
           }
         });
 
-        proc.stderr.on("data", () => {});
+        proc.stderr.on("data", (chunk) => {
+          const msg = chunk.toString().trim();
+          if (msg) console.log(`  [binary stderr] ${msg.slice(0, 200)}`);
+        });
 
         proc.on("error", (err) => {
           console.error("binary error:", err.message);
@@ -148,6 +151,7 @@ wss.on("connection", (ws) => {
         });
 
         proc.on("close", (code) => {
+          console.log(`  [binary] exited ${code}`);
           const finalResult = parseBuffer(stdoutBuf);
           for (const det of finalResult.detections) {
             if (ws.readyState === 1)

@@ -171,7 +171,7 @@ export default function RealtimePage() {
           });
         },
         "image/jpeg",
-        0.7
+        0.92
       );
     }, frameIntervalMs);
   }
