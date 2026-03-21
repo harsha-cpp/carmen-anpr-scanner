@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, DragEvent, ChangeEvent } from "react";
+import Link from "next/link";
 
 interface Detection {
   timestamp: string;
@@ -148,6 +149,18 @@ export default function HomePage() {
             Automatic Number Plate Recognition powered by Carmen Video SDK
           </p>
         </header>
+
+        <nav className="mb-8 flex justify-center gap-1 rounded-xl border border-gray-800 bg-gray-950 p-1">
+          <span className="flex-1 rounded-lg bg-white px-4 py-2 text-center text-sm font-medium text-black">
+            Upload Video
+          </span>
+          <Link
+            href="/realtime"
+            className="flex-1 rounded-lg px-4 py-2 text-center text-sm font-medium text-gray-400 hover:text-white transition-colors"
+          >
+            Live Camera
+          </Link>
+        </nav>
 
         {appState === "scanning" && (
           <div className="flex flex-col items-center gap-6 py-20">

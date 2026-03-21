@@ -6,6 +6,7 @@ import path from "path";
 export const maxDuration = 120;
 
 const BINARY_PATH =
+  process.env.BINARY_PATH ||
   "/home/kaizen/sibi/adarecog/sdk_samples/samples/C++/build/05_cloud/cpp_sample_05_cloud";
 const API_KEY = process.env.CARMEN_API_KEY ?? "";
 
