@@ -16,8 +16,8 @@ interface Detection {
 type Status = "idle" | "connecting" | "scanning" | "detected" | "error";
 
 const REGIONS = [
-  { value: "IND", label: "India (IND)" },
   { value: "EUR", label: "Europe (EUR)" },
+  { value: "GEN", label: "General — use for India (GEN)" },
   { value: "USA", label: "United States (USA)" },
   { value: "NAM", label: "North America (NAM)" },
   { value: "AFR", label: "Africa (AFR)" },
@@ -47,7 +47,7 @@ const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3002";
 export default function RealtimePage() {
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<Detection | null>(null);
-  const [region, setRegion] = useState("IND");
+  const [region, setRegion] = useState("GEN");
   const [intervalMs, setIntervalMs] = useState(1000);
   const [errorMsg, setErrorMsg] = useState("");
 

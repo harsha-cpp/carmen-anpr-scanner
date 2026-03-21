@@ -24,8 +24,8 @@ interface ScanResult {
 type AppState = "idle" | "scanning" | "results" | "error";
 
 const REGIONS = [
-  { value: "IND", label: "India (IND)" },
   { value: "EUR", label: "Europe (EUR)" },
+  { value: "GEN", label: "General — use for India (GEN)" },
   { value: "USA", label: "United States (USA)" },
   { value: "NAM", label: "North America (NAM)" },
   { value: "AFR", label: "Africa (AFR)" },
@@ -68,7 +68,7 @@ function getCategoryBadgeClass(category: string): string {
 export default function HomePage() {
   const [appState, setAppState] = useState<AppState>("idle");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [region, setRegion] = useState("IND");
+  const [region, setRegion] = useState("GEN");
   const [isDragging, setIsDragging] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
