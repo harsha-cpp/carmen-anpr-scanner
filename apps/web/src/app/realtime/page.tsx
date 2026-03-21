@@ -51,7 +51,7 @@ export default function RealtimePage() {
   const streamRef = useRef<MediaStream | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const stopAll = useCallback(() => {
+  const teardown = useCallback(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
@@ -65,10 +65,14 @@ export default function RealtimePage() {
       streamRef.current = null;
     }
     if (videoRef.current) videoRef.current.srcObject = null;
-    setStatus("idle");
   }, []);
 
-  useEffect(() => () => stopAll(), [stopAll]);
+  const stopAll = useCallback(() => {
+    teardown();
+    setStatus("idle");
+  }, [teardown]);
+
+  useEffect(() => () => teardown(), [teardown]);
 
   async function startScanning() {
     setDetections([]);
@@ -111,19 +115,25 @@ export default function RealtimePage() {
         } else if (msg.type === "error") {
           setErrorMsg(msg.message || "Server error");
           setStatus("error");
-          stopAll();
+          teardown();
+        } else if (msg.type === "ended") {
+          teardown();
+          setStatus("idle");
         }
       } catch {}
     };
 
     ws.onerror = () => {
-      setErrorMsg("WebSocket error — is the WS server running on port 3002?");
+      setErrorMsg("WebSocket error — is the WS server running?");
       setStatus("error");
-      stopAll();
+      teardown();
     };
 
     ws.onclose = () => {
-      if (status === "scanning") stopAll();
+      if (status === "scanning") {
+        teardown();
+        setStatus("idle");
+      }
     };
   }
 

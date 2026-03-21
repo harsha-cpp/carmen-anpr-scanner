@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ADMIN_USER="${ADMIN_USER:-azureuser}"
+APP_DIR="/home/${ADMIN_USER}/app"
+BINARY_PATH="${APP_DIR}/sdk_samples/samples/C++/build/05_cloud/cpp_sample_05_cloud"
+
 echo "Installing Node.js 22..."
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs
@@ -46,20 +50,20 @@ echo "Installing PM2..."
 sudo npm install -g pm2
 
 echo "Creating PM2 config..."
-cat > ~/app/ecosystem.config.cjs << 'EOF'
+cat > ~/app/ecosystem.config.cjs << EOF
 module.exports = {
   apps: [
     {
       name: "anpr-web",
-      cwd: "/root/app/apps/web",
+      cwd: "${APP_DIR}/apps/web",
       script: "node_modules/.bin/next",
       args: "start -p 3001",
-      env_file: "/root/app/apps/web/.env",
+      env_file: "${APP_DIR}/apps/web/.env",
       restart_delay: 3000,
     },
     {
       name: "anpr-ws",
-      cwd: "/root/app/apps/ws-server",
+      cwd: "${APP_DIR}/apps/ws-server",
       script: "server.js",
       node_args: "--env-file=.env",
       restart_delay: 3000,

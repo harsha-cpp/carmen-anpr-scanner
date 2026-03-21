@@ -50,35 +50,49 @@ function createMjpegServer() {
   });
 }
 
+const SEPARATOR = "------------------------------------------------------";
+
+function parseBlock(block) {
+  const det = {};
+  for (const line of block.split("\n").map((l) => l.trim()).filter(Boolean)) {
+    if (line.startsWith("Unix timestamp:"))
+      det.timestamp = line.replace("Unix timestamp:", "").trim();
+    else if (line.startsWith("Plate text:"))
+      det.plate = line.replace("Plate text:", "").trim();
+    else if (line.startsWith("Country:"))
+      det.country = line.replace("Country:", "").trim();
+    else if (line.startsWith("Make:"))
+      det.make = line.replace("Make:", "").trim();
+    else if (line.startsWith("Model:"))
+      det.model = line.replace("Model:", "").trim();
+    else if (line.startsWith("Color:"))
+      det.color = line.replace("Color:", "").trim();
+    else if (line.startsWith("Category:"))
+      det.category = line.replace("Category:", "").trim();
+  }
+  return det.plate ? det : null;
+}
+
 function parseBuffer(buffer) {
   const detections = [];
-  const parts = buffer.split(
-    "------------------------------------------------------"
-  );
-  for (let i = 0; i < parts.length - 1; i++) {
+  const parts = buffer.split(SEPARATOR);
+
+  for (let i = 0; i < parts.length; i++) {
     const block = parts[i].trim();
     if (!block) continue;
-    const det = {};
-    for (const line of block.split("\n").map((l) => l.trim()).filter(Boolean)) {
-      if (line.startsWith("Unix timestamp:"))
-        det.timestamp = line.replace("Unix timestamp:", "").trim();
-      else if (line.startsWith("Plate text:"))
-        det.plate = line.replace("Plate text:", "").trim();
-      else if (line.startsWith("Country:"))
-        det.country = line.replace("Country:", "").trim();
-      else if (line.startsWith("Make:"))
-        det.make = line.replace("Make:", "").trim();
-      else if (line.startsWith("Model:"))
-        det.model = line.replace("Model:", "").trim();
-      else if (line.startsWith("Color:"))
-        det.color = line.replace("Color:", "").trim();
-      else if (line.startsWith("Category:"))
-        det.category = line.replace("Category:", "").trim();
+
+    const isLastPart = i === parts.length - 1;
+    const hasCategory = /^Category:/m.test(block);
+
+    if (isLastPart && !hasCategory) {
+      return { detections, remaining: SEPARATOR + parts[i] };
     }
-    if (det.plate) detections.push(det);
+
+    const det = parseBlock(block);
+    if (det) detections.push(det);
   }
-  const remaining = parts[parts.length - 1];
-  return { detections, remaining };
+
+  return { detections, remaining: "" };
 }
 
 const wss = new WebSocketServer({ port: WS_PORT });
@@ -133,9 +147,27 @@ wss.on("connection", (ws) => {
             ws.send(JSON.stringify({ type: "error", message: err.message }));
         });
 
-        proc.on("close", () => {
-          if (ws.readyState === 1)
-            ws.send(JSON.stringify({ type: "status", message: "stream ended" }));
+        proc.on("close", (code) => {
+          const finalResult = parseBuffer(stdoutBuf);
+          for (const det of finalResult.detections) {
+            if (ws.readyState === 1)
+              ws.send(JSON.stringify({ type: "detection", data: det }));
+          }
+          stdoutBuf = "";
+
+          if (ws.readyState === 1) {
+            if (code !== 0 && code !== null) {
+              ws.send(JSON.stringify({ type: "error", message: `Binary exited with code ${code}` }));
+            } else {
+              ws.send(JSON.stringify({ type: "ended" }));
+            }
+          }
+
+          if (mjpeg) {
+            try { mjpeg.server.close(); } catch {}
+            mjpeg = null;
+          }
+          proc = null;
         });
 
         ws.send(JSON.stringify({ type: "ready" }));
