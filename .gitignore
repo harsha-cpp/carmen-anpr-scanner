@@ -1,0 +1,33 @@
+# dependencies
+node_modules/
+
+# next.js
+apps/web/.next/
+
+# turbo
+.turbo/
+
+# sdk binaries and installers
+sdk_linux/
+sdk_extracted/
+sdk_samples/samples/C++/build/
+anpr_engine/
+carmen_video_sdk-*.zip
+
+# test videos and images
+*.mp4
+*.jpg
+*.jpeg
+*.png
+
+# sdk docs (large)
+Carmen_User_Manual.pdf
+Carmen_User_Manual.txt
+
+# env
+.env
+.env.local
+
+# os
+.DS_Store
+Thumbs.db

@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+body {
+  background: radial-gradient(
+    ellipse 80% 50% at 50% -20%,
+    oklch(25% 0.03 220 / 0.4),
+    transparent
+  );
+}
