@@ -16,12 +16,13 @@ interface Detection {
 type Status = "idle" | "connecting" | "scanning" | "detected" | "error";
 
 const REGIONS = [
-  { value: "EUR", label: "Europe" },
-  { value: "USA", label: "United States" },
-  { value: "NAM", label: "North America" },
-  { value: "AFR", label: "Africa" },
-  { value: "ASI", label: "Asia" },
-  { value: "OCE", label: "Oceania" },
+  { value: "IND", label: "India (IND)" },
+  { value: "EUR", label: "Europe (EUR)" },
+  { value: "USA", label: "United States (USA)" },
+  { value: "NAM", label: "North America (NAM)" },
+  { value: "AFR", label: "Africa (AFR)" },
+  { value: "ASI", label: "Asia (ASI)" },
+  { value: "OCE", label: "Oceania (OCE)" },
 ];
 
 function parseColorString(colorStr: string) {
@@ -46,7 +47,7 @@ const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3002";
 export default function RealtimePage() {
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<Detection | null>(null);
-  const [region, setRegion] = useState("EUR");
+  const [region, setRegion] = useState("IND");
   const [intervalMs, setIntervalMs] = useState(1000);
   const [errorMsg, setErrorMsg] = useState("");
 
