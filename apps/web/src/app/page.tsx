@@ -107,7 +107,7 @@ export default function HomePage() {
     formData.append("region", region);
 
     try {
-      const response = await fetch("/api/scan", {
+      const response = await fetch("/anpr/api/scan", {
         method: "POST",
         body: formData,
       });
