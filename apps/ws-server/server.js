@@ -1,54 +1,16 @@
-const { createServer } = require("http");
 const { WebSocketServer } = require("ws");
 const { spawn } = require("child_process");
+const { writeFile, mkdir, rm } = require("fs/promises");
+const path = require("path");
 
 const BINARY_PATH =
   process.env.BINARY_PATH ||
   "/home/kaizen/sibi/adarecog/sdk_samples/samples/C++/build/05_cloud/cpp_sample_05_cloud";
 const API_KEY = process.env.CARMEN_API_KEY || "";
 const WS_PORT = parseInt(process.env.WS_PORT || "3002");
-const BOUNDARY = "frame";
-
-function createMjpegServer() {
-  return new Promise((resolve) => {
-    const clients = new Set();
-
-    const server = createServer((req, res) => {
-      res.setHeader(
-        "Content-Type",
-        `multipart/x-mixed-replace; boundary=${BOUNDARY}`
-      );
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-      res.setHeader("Pragma", "no-cache");
-      res.writeHead(200);
-      clients.add(res);
-      req.on("close", () => clients.delete(res));
-      req.socket.on("error", () => clients.delete(res));
-    });
-
-    server.listen(0, "127.0.0.1", () => {
-      const { port } = server.address();
-      console.log(`  MJPEG stream on 127.0.0.1:${port}`);
-
-      const pushFrame = (jpegBuffer) => {
-        if (clients.size === 0) return;
-        const header = `--${BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpegBuffer.length}\r\n\r\n`;
-        for (const res of clients) {
-          try {
-            res.write(header);
-            res.write(jpegBuffer);
-            res.write("\r\n");
-          } catch {
-            clients.delete(res);
-          }
-        }
-      };
-
-      resolve({ server, port, pushFrame });
-    });
-  });
-}
+const FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
+const FRAMES_PER_BATCH = 10;
+const TMP_DIR = "/tmp/anpr_rt";
 
 const SEPARATOR = "------------------------------------------------------";
 
@@ -73,122 +35,169 @@ function parseBlock(block) {
   return det.plate ? det : null;
 }
 
-function parseBuffer(buffer) {
+function parseAllDetections(output) {
   const detections = [];
-  const parts = buffer.split(SEPARATOR);
-
-  for (let i = 0; i < parts.length; i++) {
-    const block = parts[i].trim();
-    if (!block) continue;
-
-    const isLastPart = i === parts.length - 1;
-    const hasCategory = /^Category:/m.test(block);
-
-    if (isLastPart && !hasCategory) {
-      return { detections, remaining: SEPARATOR + parts[i] };
-    }
-
-    const det = parseBlock(block);
+  for (const block of output.split(SEPARATOR)) {
+    const trimmed = block.trim();
+    if (!trimmed) continue;
+    const det = parseBlock(trimmed);
     if (det) detections.push(det);
   }
+  return detections;
+}
 
-  return { detections, remaining: "" };
+function framesToVideo(frameDir, count, outputPath) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(FFMPEG, [
+      "-y",
+      "-framerate", "5",
+      "-i", path.join(frameDir, "frame_%04d.jpg"),
+      "-frames:v", String(count),
+      "-c:v", "libx264",
+      "-preset", "ultrafast",
+      "-pix_fmt", "yuv420p",
+      outputPath,
+    ]);
+    let stderr = "";
+    proc.stderr.on("data", (c) => { stderr += c.toString(); });
+    proc.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg failed (${code}): ${stderr.slice(-200)}`));
+    });
+    proc.on("error", reject);
+  });
+}
+
+function runBinary(region, videoPath) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(BINARY_PATH, [region, `file://${videoPath}`, API_KEY]);
+    let stdout = "";
+    let stderr = "";
+
+    const timeout = setTimeout(() => {
+      proc.kill("SIGKILL");
+      reject(new Error("Binary timed out"));
+    }, 60_000);
+
+    proc.stdout.on("data", (c) => { stdout += c.toString(); });
+    proc.stderr.on("data", (c) => { stderr += c.toString(); });
+
+    proc.on("close", () => {
+      clearTimeout(timeout);
+      if (stderr) {
+        const critical = stderr.split("\n").filter((l) => l.includes("[Critical]"));
+        if (critical.length > 0) console.log(`  [binary] ${critical[0].slice(0, 150)}`);
+      }
+      resolve(parseAllDetections(stdout));
+    });
+
+    proc.on("error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+  });
+}
+
+async function cleanupDir(dir) {
+  try { await rm(dir, { recursive: true, force: true }); } catch {}
 }
 
 const wss = new WebSocketServer({ port: WS_PORT });
-console.log(`Carmen ANPR WebSocket server → ws://localhost:${WS_PORT}`);
+console.log(`Carmen ANPR WS server (batch mode) → ws://localhost:${WS_PORT}`);
+
+let sessionCounter = 0;
 
 wss.on("connection", (ws) => {
   console.log("[+] client connected");
 
-  let mjpeg = null;
-  let proc = null;
-  let stdoutBuf = "";
+  const sessionId = `s${Date.now()}_${sessionCounter++}`;
+  let region = "EUR";
   let started = false;
+  let stopped = false;
+  let batchNum = 0;
+  let processing = false;
+  let sessionDir = null;
+  let pendingFrames = [];
 
   ws.on("message", async (data, isBinary) => {
+    if (stopped) return;
+
     if (isBinary) {
-      if (mjpeg) mjpeg.pushFrame(data);
+      if (!started) return;
+      pendingFrames.push(Buffer.from(data));
+
+      if (pendingFrames.length >= FRAMES_PER_BATCH && !processing) {
+        const batch = pendingFrames.splice(0, FRAMES_PER_BATCH);
+        processBatch(batch);
+      }
       return;
     }
 
     try {
       const msg = JSON.parse(data.toString());
-
       if (msg.type === "start" && !started) {
         started = true;
-        const region = msg.region || "EUR";
-        console.log(`  region: ${region}`);
-
-        mjpeg = await createMjpegServer();
-
-        proc = spawn(BINARY_PATH, [
-          region,
-          `http://127.0.0.1:${mjpeg.port}/`,
-          API_KEY,
-        ]);
-
-        proc.stdout.on("data", (chunk) => {
-          stdoutBuf += chunk.toString();
-          const { detections, remaining } = parseBuffer(stdoutBuf);
-          stdoutBuf = remaining;
-          for (const det of detections) {
-            if (ws.readyState === 1) {
-              ws.send(JSON.stringify({ type: "detection", data: det }));
-            }
-          }
-        });
-
-        proc.stderr.on("data", (chunk) => {
-          const msg = chunk.toString().trim();
-          if (msg) console.log(`  [binary stderr] ${msg.slice(0, 200)}`);
-        });
-
-        proc.on("error", (err) => {
-          console.error("binary error:", err.message);
-          if (ws.readyState === 1)
-            ws.send(JSON.stringify({ type: "error", message: err.message }));
-        });
-
-        proc.on("close", (code) => {
-          console.log(`  [binary] exited ${code}`);
-          const finalResult = parseBuffer(stdoutBuf);
-          for (const det of finalResult.detections) {
-            if (ws.readyState === 1)
-              ws.send(JSON.stringify({ type: "detection", data: det }));
-          }
-          stdoutBuf = "";
-
-          if (ws.readyState === 1) {
-            if (code !== 0 && code !== null) {
-              ws.send(JSON.stringify({ type: "error", message: `Binary exited with code ${code}` }));
-            } else {
-              ws.send(JSON.stringify({ type: "ended" }));
-            }
-          }
-
-          if (mjpeg) {
-            try { mjpeg.server.close(); } catch {}
-            mjpeg = null;
-          }
-          proc = null;
-        });
-
+        region = msg.region || "EUR";
+        sessionDir = path.join(TMP_DIR, sessionId);
+        await mkdir(sessionDir, { recursive: true });
+        console.log(`  session=${sessionId} region=${region}`);
         ws.send(JSON.stringify({ type: "ready" }));
       }
     } catch {}
   });
 
+  async function processBatch(frames) {
+    if (processing || stopped) return;
+    processing = true;
+    batchNum++;
+    const num = batchNum;
+    const batchDir = path.join(sessionDir, `b${num}`);
+
+    try {
+      await mkdir(batchDir, { recursive: true });
+
+      for (let i = 0; i < frames.length; i++) {
+        await writeFile(
+          path.join(batchDir, `frame_${String(i + 1).padStart(4, "0")}.jpg`),
+          frames[i]
+        );
+      }
+
+      const videoPath = path.join(batchDir, "clip.mp4");
+      await framesToVideo(batchDir, frames.length, videoPath);
+
+      const detections = await runBinary(region, videoPath);
+
+      if (detections.length > 0 && ws.readyState === 1 && !stopped) {
+        console.log(`  batch ${num}: ${detections.length} detection(s)`);
+        for (const det of detections) {
+          ws.send(JSON.stringify({ type: "detection", data: det }));
+        }
+      } else {
+        console.log(`  batch ${num}: no detections`);
+      }
+    } catch (err) {
+      console.error(`  batch ${num} error: ${err.message}`);
+      if (ws.readyState === 1 && !stopped) {
+        ws.send(JSON.stringify({ type: "error", message: err.message }));
+      }
+    } finally {
+      await cleanupDir(batchDir);
+      processing = false;
+
+      if (!stopped && pendingFrames.length >= FRAMES_PER_BATCH) {
+        const batch = pendingFrames.splice(0, FRAMES_PER_BATCH);
+        processBatch(batch);
+      }
+    }
+  }
+
   const cleanup = () => {
-    console.log("[-] client disconnected");
-    if (proc) {
-      try { proc.kill("SIGKILL"); } catch {}
-      proc = null;
-    }
-    if (mjpeg) {
-      try { mjpeg.server.close(); } catch {}
-      mjpeg = null;
-    }
+    if (stopped) return;
+    stopped = true;
+    console.log(`[-] disconnected (${sessionId})`);
+    pendingFrames = [];
+    if (sessionDir) cleanupDir(sessionDir);
   };
 
   ws.on("close", cleanup);
