@@ -1,6 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  basePath: "/anpr",
   serverExternalPackages: [],
   experimental: {
     serverActions: {

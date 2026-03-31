@@ -31,3 +31,16 @@ Carmen_User_Manual.txt
 # os
 .DS_Store
 Thumbs.db
+
+# build output
+dist/
+*.tsbuildinfo
+
+# workstation agent local data
+apps/workstation-agent/data/
+
+# sisyphus internal
+.sisyphus/
+
+# docx
+*.docx

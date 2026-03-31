@@ -198,7 +198,7 @@ export default function RealtimePage() {
 
         <nav className="mb-8 flex justify-center gap-1 rounded-xl border border-gray-800 bg-gray-950 p-1">
           <Link
-            href="/"
+            href="/anpr"
             className="flex-1 rounded-lg px-4 py-2 text-center text-sm font-medium text-gray-400 hover:text-white transition-colors"
           >
             Upload Video

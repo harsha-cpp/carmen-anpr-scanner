@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Carmen ANPR Scanner",
-  description: "Automatic Number Plate Recognition powered by Carmen Video SDK",
+  title: "COMMAND-X | Vehicle Surveillance Platform",
+  description: "Central operations platform for ANPR surveillance and fleet monitoring",
 };
 
 export default function RootLayout({
@@ -12,8 +12,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="en" className="dark">
+      <body className="min-h-screen antialiased">
+        {children}
+      </body>
     </html>
   );
 }

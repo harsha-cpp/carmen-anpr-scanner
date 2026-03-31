@@ -1,0 +1,380 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DeviceType {
+  WORKSTATION
+  TABLET
+}
+
+enum DeviceStatus {
+  PENDING
+  ACTIVE
+  OFFLINE
+  DISABLED
+}
+
+enum HitlistStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum MatchStatus {
+  PENDING
+  ACKNOWLEDGED
+  ESCALATED
+  FALSE_POSITIVE
+  RESOLVED
+}
+
+enum TelemetryKind {
+  HEARTBEAT
+  STATUS
+  METRIC
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+}
+
+enum SyncScope {
+  HITLIST
+  DETECTIONS
+  MATCH_EVENTS
+  TELEMETRY
+}
+
+model Role {
+  id          String @id @default(cuid())
+  name        String @unique
+  description String?
+  permissions Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  users       User[]
+
+  @@map("roles")
+}
+
+model User {
+  id              String   @id @default(cuid())
+  name            String
+  email           String   @unique
+  emailVerified   Boolean  @default(false)
+  image           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  username        String?  @unique
+  displayUsername String?
+  role            String   @default("operator")
+  roleDefinition  Role     @relation(fields: [role], references: [name])
+  sessions        Session[]
+  accounts        Account[]
+  hitlists        Hitlist[]
+  hitlistVersions HitlistVersion[]
+  auditLogs       AuditLog[]
+
+  @@map("user")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  expiresAt    DateTime
+  token        String   @unique
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  ipAddress    String?
+  userAgent    String?
+  impersonatedBy String?
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@unique([providerId, accountId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model Workstation {
+  id             String          @id @default(cuid())
+  deviceId       String          @unique
+  name           String
+  description    String?
+  status         DeviceStatus    @default(PENDING)
+  registeredAt   DateTime        @default(now())
+  lastSeenAt     DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  tokens         DeviceToken[]
+  detections     Detection[]
+  matchEvents    MatchEvent[]
+  telemetryPoints TelemetryPoint[]
+  pairings       DevicePairing[] @relation("WorkstationPairings")
+
+  @@map("workstations")
+}
+
+model Tablet {
+  id             String          @id @default(cuid())
+  deviceId       String          @unique
+  name           String
+  description    String?
+  status         DeviceStatus    @default(PENDING)
+  registeredAt   DateTime        @default(now())
+  lastSeenAt     DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  tokens         DeviceToken[]
+  telemetryPoints TelemetryPoint[]
+  pairings       DevicePairing[] @relation("TabletPairings")
+
+  @@map("tablets")
+}
+
+model DevicePairing {
+  id            String      @id @default(cuid())
+  workstationId String
+  tabletId      String
+  createdAt     DateTime    @default(now())
+  unpairedAt    DateTime?
+  workstation   Workstation @relation("WorkstationPairings", fields: [workstationId], references: [id], onDelete: Cascade)
+  tablet        Tablet      @relation("TabletPairings", fields: [tabletId], references: [id], onDelete: Cascade)
+
+  @@unique([workstationId, tabletId])
+  @@map("device_pairings")
+}
+
+model DeviceToken {
+  id            String       @id @default(cuid())
+  tokenHash     String       @unique
+  label         String
+  deviceType    DeviceType
+  workstationId String?
+  tabletId      String?
+  createdAt     DateTime     @default(now())
+  lastUsedAt    DateTime?
+  revokedAt     DateTime?
+  workstation   Workstation? @relation(fields: [workstationId], references: [id], onDelete: Cascade)
+  tablet        Tablet?      @relation(fields: [tabletId], references: [id], onDelete: Cascade)
+
+  @@map("device_tokens")
+}
+
+model Hitlist {
+  id                   String         @id @default(cuid())
+  name                 String
+  description          String?
+  status               HitlistStatus  @default(DRAFT)
+  currentVersionNumber Int            @default(0)
+  createdByUserId      String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  createdBy            User?          @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  versions             HitlistVersion[]
+  detections           Detection[]
+
+  @@map("hitlists")
+}
+
+model HitlistVersion {
+  id              String        @id @default(cuid())
+  hitlistId       String
+  versionNumber   Int
+  note            String?
+  createdByUserId String?
+  createdAt       DateTime      @default(now())
+  hitlist         Hitlist       @relation(fields: [hitlistId], references: [id], onDelete: Cascade)
+  createdBy       User?         @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  entries         HitlistEntry[]
+
+  @@unique([hitlistId, versionNumber])
+  @@map("hitlist_versions")
+}
+
+model HitlistEntry {
+  id                String         @id @default(cuid())
+  hitlistVersionId  String
+  plateOriginal     String
+  plateNormalized   String
+  countryOrRegion   String?
+  priority          String?
+  status            String         @default("active")
+  reasonCode        String?
+  reasonSummary     String?
+  caseReference     String?
+  sourceAgency      String?
+  validFrom         DateTime?
+  validUntil        DateTime?
+  tags              Json?
+  vehicleMake       String?
+  vehicleModel      String?
+  vehicleColor      String?
+  vehicleCategory   String?
+  ownerName         String?
+  ownerContact      String?
+  extendedCaseNotes String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  hitlistVersion    HitlistVersion @relation(fields: [hitlistVersionId], references: [id], onDelete: Cascade)
+  matchEvents       MatchEvent[]
+
+  @@index([plateNormalized])
+  @@map("hitlist_entries")
+}
+
+model Detection {
+  id              String       @id @default(cuid())
+  externalEventId String       @unique
+  workstationId   String
+  hitlistId       String?
+  occurredAt      DateTime
+  plate           String
+  country         String?
+  make            String?
+  model           String?
+  color           String?
+  category        String?
+  confidence      Float?
+  rawPayload      Json?
+  snapshotUrl     String?
+  createdAt       DateTime     @default(now())
+  workstation     Workstation  @relation(fields: [workstationId], references: [id], onDelete: Cascade)
+  hitlist         Hitlist?     @relation(fields: [hitlistId], references: [id], onDelete: SetNull)
+  matchEvents     MatchEvent[]
+  evidenceSnapshots EvidenceSnapshot[]
+
+  @@index([occurredAt])
+  @@index([plate])
+  @@map("detections")
+}
+
+model MatchEvent {
+  id              String         @id @default(cuid())
+  externalEventId String         @unique
+  detectionId     String?
+  workstationId   String
+  hitlistEntryId  String?
+  alertStatus     MatchStatus    @default(PENDING)
+  note            String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  detection       Detection?     @relation(fields: [detectionId], references: [id], onDelete: SetNull)
+  workstation     Workstation    @relation(fields: [workstationId], references: [id], onDelete: Cascade)
+  hitlistEntry    HitlistEntry?  @relation(fields: [hitlistEntryId], references: [id], onDelete: SetNull)
+  evidenceSnapshots EvidenceSnapshot[]
+
+  @@map("match_events")
+}
+
+model EvidenceSnapshot {
+  id             String      @id @default(cuid())
+  detectionId    String?
+  matchEventId   String?
+  storageKey     String
+  contentType    String?
+  capturedAt     DateTime
+  retentionUntil DateTime?
+  createdAt      DateTime    @default(now())
+  detection      Detection?  @relation(fields: [detectionId], references: [id], onDelete: SetNull)
+  matchEvent     MatchEvent? @relation(fields: [matchEventId], references: [id], onDelete: SetNull)
+
+  @@map("evidence_snapshots")
+}
+
+model TelemetryPoint {
+  id            String       @id @default(cuid())
+  workstationId String?
+  tabletId      String?
+  kind          TelemetryKind
+  payload       Json
+  createdAt     DateTime     @default(now())
+  workstation   Workstation? @relation(fields: [workstationId], references: [id], onDelete: Cascade)
+  tablet        Tablet?      @relation(fields: [tabletId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@map("telemetry_points")
+}
+
+model SyncCursor {
+  id         String     @id @default(cuid())
+  deviceType DeviceType
+  deviceKey  String
+  scope      SyncScope
+  cursor     String
+  updatedAt  DateTime   @updatedAt
+
+  @@unique([deviceType, deviceKey, scope])
+  @@map("sync_cursors")
+}
+
+model OutboxJob {
+  id            String      @id @default(cuid())
+  topic         String
+  aggregateType String
+  aggregateId   String
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  attempts      Int         @default(0)
+  availableAt   DateTime    @default(now())
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([status, availableAt])
+  @@map("outbox_jobs")
+}
+
+model AuditLog {
+  id              String      @id @default(cuid())
+  actorUserId     String?
+  actorDeviceType DeviceType?
+  actorDeviceId   String?
+  action          String
+  entityType      String
+  entityId        String
+  metadata        Json?
+  createdAt       DateTime    @default(now())
+  actorUser       User?       @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@map("audit_logs")
+}

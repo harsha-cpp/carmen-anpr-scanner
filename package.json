@@ -6,8 +6,10 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "turbo dev",
-    "build": "turbo build"
+    "dev": "turbo dev --filter=!@adarecog/ws-server",
+    "build": "turbo build",
+    "test": "turbo test",
+    "typecheck": "turbo typecheck"
   },
   "devDependencies": {
     "turbo": "^2"
