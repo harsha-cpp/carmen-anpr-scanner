@@ -14,7 +14,7 @@ sudo apt-get install -y build-essential cmake git unzip
 
 echo "Installing Carmen Video SDK..."
 cd ~
-if [ -f carmen_video_sdk-*.zip ]; then
+if compgen -G "carmen_video_sdk-*.zip" > /dev/null; then
   unzip -o carmen_video_sdk-*.zip -d carmen_sdk
   cd carmen_sdk
   if [ -f _install_all.sh ]; then
@@ -23,9 +23,16 @@ if [ -f carmen_video_sdk-*.zip ]; then
     sudo bash install-carmen_video_sdk.sh || true
   fi
   cd ~
+elif [ -d sdk_linux ] && [ -f sdk_linux/install-carmen_video_sdk.sh ]; then
+  echo "Using Linux SDK payload from ~/sdk_linux..."
+  cd sdk_linux
+  sudo bash install-carmen_video_sdk.sh
+  cd ~
 else
-  echo "ERROR: carmen_video_sdk-*.zip not found in home directory"
-  echo "Copy it first: scp carmen_video_sdk-1.2.1.35130.zip azureuser@<VM_IP>:~/"
+  echo "ERROR: no Carmen Video SDK package found"
+  echo "Provide one of the following before rerunning setup:"
+  echo "  - ~/carmen_video_sdk-*.zip"
+  echo "  - ~/sdk_linux/ with install-carmen_video_sdk.sh and the Linux tarballs"
   exit 1
 fi
 

@@ -22,22 +22,17 @@ const REGIONS = [
   { value: "AFR", label: "Africa (AFR)" },
 ];
 
-function parseColorString(colorStr: string) {
-  const match = colorStr.match(/R=(\d+),\s*G=(\d+),\s*B=(\d+)/);
-  if (!match) return null;
-  return {
-    r: parseInt(match[1], 10),
-    g: parseInt(match[2], 10),
-    b: parseInt(match[3], 10),
-  };
-}
-
 const INTERVALS = [
   { label: "0.5 fps  (slowest — 1 frame / 2s)", ms: 2000 },
   { label: "1 fps  (1 frame / 1s)", ms: 1000 },
   { label: "2 fps  (1 frame / 500ms)", ms: 500 },
   { label: "3 fps  (fastest)", ms: 333 },
 ];
+
+const MAX_FRAME_WIDTH = 720;
+const JPEG_QUALITY = 0.88;
+const CROP_WIDTH_RATIO = 0.84;
+const CROP_HEIGHT_RATIO = 0.42;
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3002";
 
@@ -154,11 +149,29 @@ export default function RealtimePage() {
       if (ws.readyState !== WebSocket.OPEN) return;
       if (video.readyState < 2) return;
 
-      canvas.width = video.videoWidth || 1280;
-      canvas.height = video.videoHeight || 720;
+      const sourceWidth = video.videoWidth || 1280;
+      const sourceHeight = video.videoHeight || 720;
+      const cropWidth = Math.round(sourceWidth * CROP_WIDTH_RATIO);
+      const cropHeight = Math.round(sourceHeight * CROP_HEIGHT_RATIO);
+      const cropX = Math.round((sourceWidth - cropWidth) / 2);
+      const cropY = Math.round((sourceHeight - cropHeight) / 2);
+      const scale = Math.min(1, MAX_FRAME_WIDTH / cropWidth);
+
+      canvas.width = Math.round(cropWidth * scale);
+      canvas.height = Math.round(cropHeight * scale);
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      ctx.drawImage(video, 0, 0);
+      ctx.drawImage(
+        video,
+        cropX,
+        cropY,
+        cropWidth,
+        cropHeight,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
 
       canvas.toBlob(
         (blob) => {
@@ -168,7 +181,7 @@ export default function RealtimePage() {
           });
         },
         "image/jpeg",
-        0.92
+        JPEG_QUALITY
       );
     }, frameIntervalMs);
   }
@@ -319,7 +332,15 @@ export default function RealtimePage() {
 }
 
 function ResultCard({ detection: d }: { detection: Detection }) {
-  const parsedColor = parseColorString(d.color);
+  const details = [
+    ["Country", d.country],
+    ["Make", d.make],
+    ["Model", d.model],
+    ["Color", d.color],
+    ["Category", d.category],
+    ["Detected At", d.timestamp],
+  ].filter(([, value]) => Boolean(value));
+
   return (
     <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl p-6">
       <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent pointer-events-none" />
@@ -335,24 +356,20 @@ function ResultCard({ detection: d }: { detection: Detection }) {
           <span className="font-mono text-3xl font-bold tracking-[0.2em] text-white border border-gray-600 rounded-xl px-4 py-2 bg-black/40">
             {d.plate}
           </span>
-          {d.country && (
-            <span className="font-mono text-sm text-gray-400 bg-black/40 border border-gray-700 px-3 py-1.5 rounded-lg">
-              {d.country}
-            </span>
-          )}
-          {parsedColor && (
-            <div
-              className="h-6 w-6 rounded-full border border-gray-600 ring-2 ring-gray-800 shrink-0"
-              style={{ backgroundColor: `rgb(${parsedColor.r},${parsedColor.g},${parsedColor.b})` }}
-            />
-          )}
+          <span className="rounded-lg border border-gray-700 bg-black/40 px-3 py-1.5 text-sm text-gray-300">
+            Scan stopped
+          </span>
         </div>
 
-        <div className="grid grid-cols-2 gap-x-6 gap-y-3">
-          {d.make && <Field label="Make" value={d.make} />}
-          {d.model && <Field label="Model" value={d.model} />}
-          {d.category && <Field label="Category" value={d.category} />}
-          {d.timestamp && <Field label="Timestamp" value={d.timestamp} mono />}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {details.map(([label, value]) => (
+            <Field
+              key={label}
+              label={label}
+              value={value}
+              mono={label === "Detected At"}
+            />
+          ))}
         </div>
       </div>
     </div>

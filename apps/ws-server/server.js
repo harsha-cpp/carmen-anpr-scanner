@@ -1,205 +1,151 @@
 const { WebSocketServer } = require("ws");
-const { spawn } = require("child_process");
-const { writeFile, mkdir, rm } = require("fs/promises");
-const path = require("path");
 
-const BINARY_PATH =
-  process.env.BINARY_PATH ||
-  "/home/kaizen/sibi/adarecog/sdk_samples/samples/C++/build/05_cloud/cpp_sample_05_cloud";
-const API_KEY = process.env.CARMEN_API_KEY || "";
+// Support the newer realtime env name without breaking older deployments.
+const VEHICLE_API_KEY =
+  process.env.VEHICLE_API_KEY ||
+  process.env.CARMEN_API_KEY ||
+  "";
+const VEHICLE_API_BASE = process.env.VEHICLE_API_BASE || "https://ap-southeast-1.api.carmencloud.com/vehicle";
 const WS_PORT = parseInt(process.env.WS_PORT || "3002");
-const FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
-const FRAMES_PER_BATCH = 10;
-const TMP_DIR = "/tmp/anpr_rt";
 
-const SEPARATOR = "------------------------------------------------------";
-
-function parseBlock(block) {
-  const det = {};
-  for (const line of block.split("\n").map((l) => l.trim()).filter(Boolean)) {
-    if (line.startsWith("Unix timestamp:"))
-      det.timestamp = line.replace("Unix timestamp:", "").trim();
-    else if (line.startsWith("Plate text:"))
-      det.plate = line.replace("Plate text:", "").trim();
-    else if (line.startsWith("Country:"))
-      det.country = line.replace("Country:", "").trim();
-    else if (line.startsWith("Make:"))
-      det.make = line.replace("Make:", "").trim();
-    else if (line.startsWith("Model:"))
-      det.model = line.replace("Model:", "").trim();
-    else if (line.startsWith("Color:"))
-      det.color = line.replace("Color:", "").trim();
-    else if (line.startsWith("Category:"))
-      det.category = line.replace("Category:", "").trim();
-  }
-  return det.plate ? det : null;
-}
-
-function parseAllDetections(output) {
-  const detections = [];
-  for (const block of output.split(SEPARATOR)) {
-    const trimmed = block.trim();
-    if (!trimmed) continue;
-    const det = parseBlock(trimmed);
-    if (det) detections.push(det);
-  }
-  return detections;
-}
-
-function framesToVideo(frameDir, count, outputPath) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(FFMPEG, [
-      "-y",
-      "-framerate", "5",
-      "-i", path.join(frameDir, "frame_%04d.jpg"),
-      "-frames:v", String(count),
-      "-c:v", "libx264",
-      "-preset", "ultrafast",
-      "-pix_fmt", "yuv420p",
-      outputPath,
-    ]);
-    let stderr = "";
-    proc.stderr.on("data", (c) => { stderr += c.toString(); });
-    proc.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`ffmpeg failed (${code}): ${stderr.slice(-200)}`));
-    });
-    proc.on("error", reject);
-  });
-}
-
-function runBinary(region, videoPath) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(BINARY_PATH, [region, `file://${videoPath}`, API_KEY]);
-    let stdout = "";
-    let stderr = "";
-
-    const timeout = setTimeout(() => {
-      proc.kill("SIGKILL");
-      reject(new Error("Binary timed out"));
-    }, 60_000);
-
-    proc.stdout.on("data", (c) => { stdout += c.toString(); });
-    proc.stderr.on("data", (c) => { stderr += c.toString(); });
-
-    proc.on("close", () => {
-      clearTimeout(timeout);
-      if (stderr) {
-        const critical = stderr.split("\n").filter((l) => l.includes("[Critical]"));
-        if (critical.length > 0) console.log(`  [binary] ${critical[0].slice(0, 150)}`);
-      }
-      resolve(parseAllDetections(stdout));
-    });
-
-    proc.on("error", (err) => {
-      clearTimeout(timeout);
-      reject(err);
-    });
-  });
-}
-
-async function cleanupDir(dir) {
-  try { await rm(dir, { recursive: true, force: true }); } catch {}
-}
+const DEDUP_MS = 8000;
 
 const wss = new WebSocketServer({ port: WS_PORT });
-console.log(`Carmen ANPR WS server (batch mode) → ws://localhost:${WS_PORT}`);
-
-let sessionCounter = 0;
+console.log(`Carmen ANPR WS server (Vehicle API) → ws://localhost:${WS_PORT}`);
 
 wss.on("connection", (ws) => {
   console.log("[+] client connected");
 
-  const sessionId = `s${Date.now()}_${sessionCounter++}`;
-  let region = "EUR";
+  let region = "sas";
   let started = false;
   let stopped = false;
-  let batchNum = 0;
   let processing = false;
-  let sessionDir = null;
-  let pendingFrames = [];
+  let queuedFrame = null;
+  const lastSeen = new Map();
 
   ws.on("message", async (data, isBinary) => {
     if (stopped) return;
 
-    if (isBinary) {
-      if (!started) return;
-      pendingFrames.push(Buffer.from(data));
-
-      if (pendingFrames.length >= FRAMES_PER_BATCH && !processing) {
-        const batch = pendingFrames.splice(0, FRAMES_PER_BATCH);
-        processBatch(batch);
-      }
+    if (!isBinary) {
+      try {
+        const msg = JSON.parse(data.toString());
+        if (msg.type === "start" && !started) {
+          if (!VEHICLE_API_KEY) {
+            ws.send(JSON.stringify({
+              type: "error",
+              message: "Realtime scanning is not configured: missing VEHICLE_API_KEY.",
+            }));
+            stopped = true;
+            return;
+          }
+          started = true;
+          region = (msg.region || "sas").toLowerCase();
+          console.log(`  session started, region=${region}`);
+          ws.send(JSON.stringify({ type: "ready" }));
+        }
+      } catch {}
       return;
     }
 
-    try {
-      const msg = JSON.parse(data.toString());
-      if (msg.type === "start" && !started) {
-        started = true;
-        region = msg.region || "EUR";
-        sessionDir = path.join(TMP_DIR, sessionId);
-        await mkdir(sessionDir, { recursive: true });
-        console.log(`  session=${sessionId} region=${region}`);
-        ws.send(JSON.stringify({ type: "ready" }));
-      }
-    } catch {}
+    if (!started) return;
+
+    queuedFrame = Buffer.from(data);
+    if (processing) return;
+    void processLatestFrame();
   });
 
-  async function processBatch(frames) {
-    if (processing || stopped) return;
+  async function processLatestFrame() {
+    if (processing || stopped || !queuedFrame) return;
     processing = true;
-    batchNum++;
-    const num = batchNum;
-    const batchDir = path.join(sessionDir, `b${num}`);
 
-    try {
-      await mkdir(batchDir, { recursive: true });
+    while (!stopped && queuedFrame) {
+      const jpegBuffer = queuedFrame;
+      queuedFrame = null;
+      console.log(`  frame received (${jpegBuffer.length}b)`);
 
-      for (let i = 0; i < frames.length; i++) {
-        await writeFile(
-          path.join(batchDir, `frame_${String(i + 1).padStart(4, "0")}.jpg`),
-          frames[i]
-        );
-      }
+      const t0 = Date.now();
+      try {
+        const detections = await callVehicleAPI(jpegBuffer, region);
+        const elapsed = Date.now() - t0;
 
-      const videoPath = path.join(batchDir, "clip.mp4");
-      await framesToVideo(batchDir, frames.length, videoPath);
-
-      const detections = await runBinary(region, videoPath);
-
-      if (detections.length > 0 && ws.readyState === 1 && !stopped) {
-        console.log(`  batch ${num}: ${detections.length} detection(s)`);
-        for (const det of detections) {
-          ws.send(JSON.stringify({ type: "detection", data: det }));
+        if (detections.length === 0) {
+          console.log(`  frame: no plate (${elapsed}ms, ${jpegBuffer.length}b)`);
         }
-      } else {
-        console.log(`  batch ${num}: no detections`);
-      }
-    } catch (err) {
-      console.error(`  batch ${num} error: ${err.message}`);
-      if (ws.readyState === 1 && !stopped) {
-        ws.send(JSON.stringify({ type: "error", message: err.message }));
-      }
-    } finally {
-      await cleanupDir(batchDir);
-      processing = false;
 
-      if (!stopped && pendingFrames.length >= FRAMES_PER_BATCH) {
-        const batch = pendingFrames.splice(0, FRAMES_PER_BATCH);
-        processBatch(batch);
+        const now = Date.now();
+        for (const det of detections) {
+          const last = lastSeen.get(det.plate) || 0;
+          if (now - last < DEDUP_MS) continue;
+          lastSeen.set(det.plate, now);
+
+          console.log(`  detected: ${det.plate} (${det.country}) conf=${det.confidence} ${elapsed}ms`);
+          if (ws.readyState === 1 && !stopped) {
+            ws.send(JSON.stringify({ type: "detection", data: det }));
+          }
+          queuedFrame = null;
+          stopped = true;
+          break;
+        }
+      } catch (err) {
+        console.error(`  frame error: ${err.message}`);
       }
+    }
+
+    processing = false;
+    if (!stopped && queuedFrame) {
+      void processLatestFrame();
     }
   }
 
   const cleanup = () => {
     if (stopped) return;
     stopped = true;
-    console.log(`[-] disconnected (${sessionId})`);
-    pendingFrames = [];
-    if (sessionDir) cleanupDir(sessionDir);
+    queuedFrame = null;
+    console.log("[-] client disconnected");
   };
 
   ws.on("close", cleanup);
   ws.on("error", cleanup);
 });
+
+async function callVehicleAPI(jpegBuffer, region) {
+  const form = new FormData();
+  const blob = new Blob([jpegBuffer], { type: "image/jpeg" });
+  form.append("image", blob, "frame.jpg");
+  form.append("service", "anpr,mmr");
+
+  const url = `${VEHICLE_API_BASE}/${region}`;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "X-Api-Key": VEHICLE_API_KEY },
+    body: form,
+    signal: AbortSignal.timeout(15000),
+  });
+
+  if (!resp.ok) {
+    const body = await resp.text();
+    throw new Error(`API ${resp.status}: ${body.slice(0, 120)}`);
+  }
+
+  return parseVehicles(await resp.json());
+}
+
+function parseVehicles(json) {
+  const results = [];
+  for (const v of (json?.data?.vehicles || [])) {
+    const plate = v.plate;
+    if (!plate?.found || !plate?.unicodeText) continue;
+    const mmr = v.mmr;
+    results.push({
+      timestamp: new Date().toISOString(),
+      plate: plate.unicodeText,
+      country: plate.country || "",
+      category: mmr?.category || "",
+      make: mmr?.make || "",
+      model: mmr?.model || "",
+      color: mmr?.colorName || "",
+      confidence: plate.confidence ?? 0,
+    });
+  }
+  return results;
+}
