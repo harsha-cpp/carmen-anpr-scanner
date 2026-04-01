@@ -4,8 +4,22 @@ import { prisma } from "../lib/prisma.js";
 import { normalizePlate } from "../utils/plate.js";
 import { fail, ok } from "../utils/json.js";
 import { writeAuditLog } from "../lib/audit.js";
+import { encryptOptional, decryptOptional } from "../lib/encryption.js";
 
 export const hitlistRoutes = new Hono<AppBindings>();
+
+function decryptEntry<T extends { ownerName?: string | null; ownerContact?: string | null; extendedCaseNotes?: string | null }>(entry: T): T {
+  return {
+    ...entry,
+    ownerName: decryptOptional(entry.ownerName),
+    ownerContact: decryptOptional(entry.ownerContact),
+    extendedCaseNotes: decryptOptional(entry.extendedCaseNotes),
+  };
+}
+
+function decryptEntries<T extends { ownerName?: string | null; ownerContact?: string | null; extendedCaseNotes?: string | null }>(entries: T[]): T[] {
+  return entries.map(decryptEntry);
+}
 
 interface HitlistEntryInput {
   plateOriginal?: string;
@@ -91,7 +105,15 @@ hitlistRoutes.get("/api/hitlists/:hitlistId", async (c) => {
     return fail(c, 404, "Hitlist not found.");
   }
 
-  return ok(c, hitlist);
+  const decrypted = {
+    ...hitlist,
+    versions: hitlist.versions.map((v) => ({
+      ...v,
+      entries: decryptEntries(v.entries),
+    })),
+  };
+
+  return ok(c, decrypted);
 });
 
 hitlistRoutes.post("/api/hitlists/:hitlistId/versions", async (c) => {
@@ -138,9 +160,9 @@ hitlistRoutes.post("/api/hitlists/:hitlistId/versions", async (c) => {
           vehicleModel: typeof entry.vehicleModel === "string" ? entry.vehicleModel : null,
           vehicleColor: typeof entry.vehicleColor === "string" ? entry.vehicleColor : null,
           vehicleCategory: typeof entry.vehicleCategory === "string" ? entry.vehicleCategory : null,
-          ownerName: typeof entry.ownerName === "string" ? entry.ownerName : null,
-          ownerContact: typeof entry.ownerContact === "string" ? entry.ownerContact : null,
-          extendedCaseNotes: typeof entry.extendedCaseNotes === "string" ? entry.extendedCaseNotes : null,
+          ownerName: encryptOptional(typeof entry.ownerName === "string" ? entry.ownerName : null),
+          ownerContact: encryptOptional(typeof entry.ownerContact === "string" ? entry.ownerContact : null),
+          extendedCaseNotes: encryptOptional(typeof entry.extendedCaseNotes === "string" ? entry.extendedCaseNotes : null),
         })),
       },
     },
@@ -163,7 +185,12 @@ hitlistRoutes.post("/api/hitlists/:hitlistId/versions", async (c) => {
     metadata: { hitlistId, versionNumber: nextVersion, entryCount: entries.length },
   });
 
-  return ok(c, version, 201);
+  const decryptedVersion = {
+    ...version,
+    entries: decryptEntries(version.entries),
+  };
+
+  return ok(c, decryptedVersion, 201);
 });
 
 hitlistRoutes.get("/api/hitlists/:hitlistId/versions", async (c) => {
@@ -173,5 +200,10 @@ hitlistRoutes.get("/api/hitlists/:hitlistId/versions", async (c) => {
     orderBy: { versionNumber: "desc" },
   });
 
-  return ok(c, versions);
+  const decryptedVersions = versions.map((v) => ({
+    ...v,
+    entries: decryptEntries(v.entries),
+  }));
+
+  return ok(c, decryptedVersions);
 });
