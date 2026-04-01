@@ -89,6 +89,32 @@ function formatDate(dateStr: string): string {
   });
 }
 
+function timeAgo(dateStr: string | null): string {
+  if (!dateStr) return "Never";
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function workstationHealthMeta(status: DeviceStatus): {
+  label: string;
+  dotClass: string;
+  badgeVariant: "success" | "destructive" | "warning" | "secondary";
+} {
+  const map: Record<DeviceStatus, { label: string; dotClass: string; badgeVariant: "success" | "destructive" | "warning" | "secondary" }> = {
+    ACTIVE: { label: "Active", dotClass: "bg-success", badgeVariant: "success" },
+    OFFLINE: { label: "Offline", dotClass: "bg-destructive", badgeVariant: "destructive" },
+    PENDING: { label: "Pending", dotClass: "bg-warning", badgeVariant: "warning" },
+    DISABLED: { label: "Disabled", dotClass: "bg-muted-foreground", badgeVariant: "secondary" },
+  };
+
+  return map[status] ?? map.OFFLINE;
+}
+
 function SkeletonCard() {
   return (
     <Card className="glass animate-pulse">
@@ -333,14 +359,73 @@ export default function DashboardPage() {
 
       <Card className="glass">
         <CardContent className="p-6">
+          <div className="flex items-center gap-2 mb-5">
+            <Monitor className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold text-foreground">Workstation Health</h2>
+          </div>
+
+          {loading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {["ws-health-1", "ws-health-2", "ws-health-3"].map((key) => (
+                <Card key={key} className="glass animate-pulse border-border/60">
+                  <CardContent className="p-5 space-y-3">
+                    <div className="h-4 w-28 rounded bg-muted" />
+                    <div className="h-4 w-20 rounded bg-muted" />
+                    <div className="h-10 rounded bg-muted" />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : wsList.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No workstations registered</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {wsList.map((workstation) => {
+                const statusMeta = workstationHealthMeta(workstation.status);
+
+                return (
+                  <Card key={workstation.id} className="glass glass-hover transition-all border-border/60">
+                    <CardContent className="p-5 space-y-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-foreground truncate">{workstation.name}</p>
+                          <p className="text-xs text-muted-foreground mt-1">Operational status overview</p>
+                        </div>
+                        <Badge variant={statusMeta.badgeVariant} className="inline-flex items-center gap-1.5 shrink-0">
+                          <span className={cn("h-2 w-2 rounded-full", statusMeta.dotClass)} />
+                          {statusMeta.label}
+                        </Badge>
+                      </div>
+
+                      <div className="rounded-lg border border-border bg-card/30 px-3 py-3 space-y-2">
+                        <div className="flex items-center justify-between text-sm gap-4">
+                          <span className="text-muted-foreground">Status</span>
+                          <span className="text-foreground font-medium">{statusMeta.label}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm gap-4">
+                          <span className="text-muted-foreground">Last seen</span>
+                          <span className="text-foreground font-medium">{timeAgo(workstation.lastSeenAt)}</span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="glass">
+        <CardContent className="p-6">
         <div className="flex items-center gap-2 mb-5">
           <Clock className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-semibold text-foreground">Recent Activity</h2>
         </div>
         {loading ? (
           <div className="space-y-3">
-            {Array.from({ length: 5 }, (_, i) => (
-              <div key={i} className="flex items-center justify-between animate-pulse py-2">
+            {["activity-1", "activity-2", "activity-3", "activity-4", "activity-5"].map((key) => (
+              <div key={key} className="flex items-center justify-between animate-pulse py-2">
                 <div className="h-4 w-48 rounded bg-muted" />
                 <div className="h-4 w-24 rounded bg-muted" />
               </div>
