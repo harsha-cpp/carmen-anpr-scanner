@@ -78,3 +78,38 @@ telemetryRoutes.get("/api/telemetry/device/:deviceId", async (c) => {
 
   return ok(c, telemetry);
 });
+
+telemetryRoutes.get("/api/devices/:deviceId/health", async (c) => {
+  const deviceId = c.req.param("deviceId");
+
+  const workstation = await prisma.workstation.findUnique({
+    where: { deviceId },
+    select: {
+      id: true,
+      deviceId: true,
+      name: true,
+      status: true,
+      lastSeenAt: true,
+    },
+  });
+
+  if (!workstation) {
+    return fail(c, 404, "Workstation not found.");
+  }
+
+  const telemetry = await prisma.telemetryPoint.findMany({
+    where: {
+      workstationId: workstation.id,
+      kind: "HEARTBEAT",
+    },
+    orderBy: { createdAt: "desc" },
+    take: 10,
+  });
+
+  return ok(c, {
+    status: workstation.status,
+    lastSeenAt: workstation.lastSeenAt,
+    workstation,
+    telemetry,
+  });
+});

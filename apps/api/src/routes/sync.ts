@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppBindings } from "../types.js";
 import { prisma } from "../lib/prisma.js";
 import { fail, ok } from "../utils/json.js";
+import { writeAuditLog } from "../lib/audit.js";
 
 export const syncRoutes = new Hono<AppBindings>();
 
@@ -101,6 +102,14 @@ syncRoutes.post("/api/sync/cursors", async (c) => {
       scope,
       cursor,
     },
+  });
+
+  await writeAuditLog({
+    actorDevice: device,
+    action: "sync.cursor.updated",
+    entityType: "sync_cursor",
+    entityId: record.id,
+    metadata: { scope, cursor },
   });
 
   return ok(c, record, 201);
