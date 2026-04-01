@@ -1,6 +1,9 @@
 import bcrypt from "bcryptjs";
 import { prisma } from "../lib/prisma.js";
 import { config } from "../lib/env.js";
+import { createLogger } from "../lib/logger.js";
+
+const logger = createLogger("seed");
 
 async function main() {
   await prisma.role.upsert({
@@ -34,7 +37,7 @@ async function main() {
   });
 
   if (existing) {
-    console.log(`Admin already exists: ${existing.email}`);
+    logger.info({ email: existing.email }, "admin already exists");
     return;
   }
 
@@ -58,12 +61,12 @@ async function main() {
     },
   });
 
-  console.log(`Seeded admin ${config.seedAdminEmail} / ${config.seedAdminUsername}`);
+  logger.info({ email: config.seedAdminEmail, username: config.seedAdminUsername }, "admin seeded");
 }
 
 main()
   .catch((error) => {
-    console.error(error);
+    logger.error({ err: error }, "seed failed");
     process.exitCode = 1;
   })
   .finally(async () => {
