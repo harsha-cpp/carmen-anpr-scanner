@@ -766,6 +766,41 @@ Exit criteria:
 - platform is supportable in production
 - security posture is documented and testable
 
+### Phase 6.5: Standalone Scanner Interface For Field Operators
+
+Context:
+
+The current `/portal/scan` page works end-to-end — it captures frames via WebSocket, calls Carmen Cloud, posts detections to the central API, matches against hitlists, and creates match events and alerts. However, it lives inside the admin portal (`/portal/(app)/`) behind a shared layout that gives all authenticated users access to the full sidebar: Dashboard, Alerts, Watchlist, Devices, Analytics, Settings, and more.
+
+Traffic police officers on tablets should not see any of that. They have one job: scan plates. Giving them portal access creates unnecessary surface area — they could accidentally navigate to watchlist management, device settings, or alert workflows that are meant for central operators only. It also creates a role enforcement gap: today any authenticated user can access the full portal regardless of their intended function.
+
+The fix is a purpose-built scanner surface that is completely separate from the admin portal at the route, layout, and role level. Field operators get a dedicated `/scanner/` section: a login page, a fullscreen scan UI with no sidebar or portal navigation, and nothing else. Central operators and admins land in `/portal/` as before and cannot reach `/scanner/`. The API enforces the same separation by restricting scan endpoints to users with appropriate roles.
+
+Scope:
+
+- add `scanner` role to the API: seed script, better-auth config, and Role table
+- update the seed-admin script to upsert the scanner role alongside admin and operator
+- update the better-auth `additionalFields.role.type` array to include `"scanner"`
+- add `scanner` to the allowed roles on `POST /api/portal/scan` via `requireRole`
+- create `apps/web/src/app/scanner/` route group, separate from `apps/web/src/app/portal/`
+- create `apps/web/src/app/scanner/login/page.tsx` — a clean scanner login form that redirects to `/scanner/scan` on success, branded for field operators
+- create `apps/web/src/app/scanner/(app)/layout.tsx` — minimal layout with no sidebar, no portal nav, just a fullscreen wrapper with a sign-out button and an auth guard that redirects non-scanner roles to `/portal/` and unauthenticated users to `/scanner/login`
+- create `apps/web/src/app/scanner/(app)/scan/page.tsx` — the same continuous ANPR scanning UI currently at `/portal/scan` but without any portal chrome
+- create `apps/web/src/middleware.ts` — Next.js route middleware that reads the session cookie, fetches the user role from `/api/session`, and enforces role-based routing: scanner role → `/scanner/*` only, admin/operator → `/portal/*` only, unauthenticated → appropriate login page
+- update the root `/` and `/portal` redirects to check role before assuming `/portal/dashboard` as the landing target
+- add a `seed:scanner` script or extend seed-admin to create a sample scanner user for local development
+- update integration tests to cover scanner role sign-in and scan endpoint access
+
+Exit criteria:
+
+- a user with role `scanner` can log in at `/scanner/login` and reach `/scanner/scan`
+- a user with role `scanner` is redirected away from any `/portal/*` URL to `/scanner/scan`
+- a user with role `admin` or `operator` is redirected away from any `/scanner/*` URL to `/portal/dashboard`
+- the scanner UI has no sidebar, no portal navigation, and no links to portal pages
+- `POST /api/portal/scan` returns 403 for an unauthenticated request and 200 for a scanner-role request
+- `GET /portal/dashboard` is unreachable for a scanner-role session
+- existing admin and operator flows are unaffected
+
 ### Phase 7: Pilot Rollout
 
 Scope:
