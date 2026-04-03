@@ -31,22 +31,29 @@ cd carmen-anpr-scanner
 npm install
 ```
 
-### 2. set up postgresql
+### 2. start the local services
 
-start a postgres instance on port 5434 (or change the DATABASE_URL in the env file):
+the repo now includes a docker compose stack for local development:
 
 ```bash
-# using docker
-docker run -d --name adarecog-pg \
-  -e POSTGRES_USER=postgres \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=adarecog_phase1 \
-  -p 5434:5432 \
-  postgres:15
-
-# or use your existing postgres and create the database
-createdb -p 5434 adarecog_phase1
+docker compose up --build db api web
 ```
+
+if you need the realtime websocket scanner service as well:
+
+```bash
+docker compose --profile scanner up --build db api web ws-server
+```
+
+the compose stack starts:
+
+- postgres on `localhost:5434` with both `adarecog_phase1` and `carmen_anpr`
+- api on `http://localhost:3003`
+- web on `http://localhost:3001`
+- optional ws-server on `ws://localhost:3002`
+
+`workstation-agent` is not part of the compose stack by default because it is hardware-bound and expects local camera/ffmpeg/TTS access.
+the web container talks to the api over Docker networking internally, while the browser still uses `localhost` URLs from your host.
 
 ### 3. configure environment
 
@@ -62,15 +69,19 @@ cp apps/workstation-agent/.env.example apps/workstation-agent/.env
 
 ### 4. initialize the database
 
+the compose `api` service runs `db:deploy` and `seed:admin` on startup, so no separate bootstrap step is required when using docker compose.
+
+if you are running the services directly on your host instead of compose, use:
+
 ```bash
 npm --workspace @adarecog/api run prisma:generate
 npm --workspace @adarecog/api run db:migrate -- --name init
 npm --workspace @adarecog/api run seed:admin
 ```
 
-this creates the schema and seeds a default admin user. default credentials from `.env.example`:
-- email: `admin@example.com`
-- password: `ChangeMe123!`
+default credentials from `.env.example`:
+- email: `sibi@sibi.com`
+- password: `sibi`
 
 ### 5. run everything
 

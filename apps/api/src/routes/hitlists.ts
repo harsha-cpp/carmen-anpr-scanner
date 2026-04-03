@@ -3,6 +3,7 @@ import type { AppBindings } from "../types.js";
 import { prisma } from "../lib/prisma.js";
 import { normalizePlate } from "../utils/plate.js";
 import { fail, ok } from "../utils/json.js";
+import { parseOptionalDateInput } from "../utils/date.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { encryptOptional, decryptOptional } from "../lib/encryption.js";
 
@@ -133,6 +134,44 @@ hitlistRoutes.post("/api/hitlists/:hitlistId/versions", async (c) => {
   }
 
   const nextVersion = hitlist.currentVersionNumber + 1;
+  const normalizedEntries = [];
+
+  for (const [index, entry] of entries.entries()) {
+    const validFrom = parseOptionalDateInput(entry.validFrom);
+    const validUntil = parseOptionalDateInput(entry.validUntil);
+
+    if (validFrom === undefined) {
+      return fail(c, 400, `entries[${index}].validFrom must be a valid ISO date string.`);
+    }
+
+    if (validUntil === undefined) {
+      return fail(c, 400, `entries[${index}].validUntil must be a valid ISO date string.`);
+    }
+
+    normalizedEntries.push({
+      plateOriginal: String(entry.plateOriginal ?? entry.plate ?? "").trim(),
+      plateNormalized: normalizePlate(String(entry.plateNormalized ?? entry.plateOriginal ?? entry.plate ?? "")),
+      countryOrRegion: typeof entry.countryOrRegion === "string" ? entry.countryOrRegion : null,
+      priority: typeof entry.priority === "string" ? entry.priority : null,
+      status: typeof entry.status === "string" ? entry.status : "active",
+      reasonCode: typeof entry.reasonCode === "string" ? entry.reasonCode : null,
+      reasonSummary: typeof entry.reasonSummary === "string" ? entry.reasonSummary : null,
+      caseReference: typeof entry.caseReference === "string" ? entry.caseReference : null,
+      sourceAgency: typeof entry.sourceAgency === "string" ? entry.sourceAgency : null,
+      validFrom,
+      validUntil,
+      tags: Array.isArray(entry.tags)
+        ? entry.tags.filter((tag): tag is string => typeof tag === "string")
+        : undefined,
+      vehicleMake: typeof entry.vehicleMake === "string" ? entry.vehicleMake : null,
+      vehicleModel: typeof entry.vehicleModel === "string" ? entry.vehicleModel : null,
+      vehicleColor: typeof entry.vehicleColor === "string" ? entry.vehicleColor : null,
+      vehicleCategory: typeof entry.vehicleCategory === "string" ? entry.vehicleCategory : null,
+      ownerName: encryptOptional(typeof entry.ownerName === "string" ? entry.ownerName : null),
+      ownerContact: encryptOptional(typeof entry.ownerContact === "string" ? entry.ownerContact : null),
+      extendedCaseNotes: encryptOptional(typeof entry.extendedCaseNotes === "string" ? entry.extendedCaseNotes : null),
+    });
+  }
 
   const version = await prisma.hitlistVersion.create({
     data: {
@@ -141,29 +180,7 @@ hitlistRoutes.post("/api/hitlists/:hitlistId/versions", async (c) => {
       note,
       createdByUserId: user?.id,
       entries: {
-        create: entries.map((entry: HitlistEntryInput) => ({
-          plateOriginal: String(entry.plateOriginal ?? entry.plate ?? "").trim(),
-          plateNormalized: normalizePlate(String(entry.plateNormalized ?? entry.plateOriginal ?? entry.plate ?? "")),
-          countryOrRegion: typeof entry.countryOrRegion === "string" ? entry.countryOrRegion : null,
-          priority: typeof entry.priority === "string" ? entry.priority : null,
-          status: typeof entry.status === "string" ? entry.status : "active",
-          reasonCode: typeof entry.reasonCode === "string" ? entry.reasonCode : null,
-          reasonSummary: typeof entry.reasonSummary === "string" ? entry.reasonSummary : null,
-          caseReference: typeof entry.caseReference === "string" ? entry.caseReference : null,
-          sourceAgency: typeof entry.sourceAgency === "string" ? entry.sourceAgency : null,
-          validFrom: entry.validFrom ? new Date(entry.validFrom) : null,
-          validUntil: entry.validUntil ? new Date(entry.validUntil) : null,
-          tags: Array.isArray(entry.tags)
-            ? entry.tags.filter((tag): tag is string => typeof tag === "string")
-            : undefined,
-          vehicleMake: typeof entry.vehicleMake === "string" ? entry.vehicleMake : null,
-          vehicleModel: typeof entry.vehicleModel === "string" ? entry.vehicleModel : null,
-          vehicleColor: typeof entry.vehicleColor === "string" ? entry.vehicleColor : null,
-          vehicleCategory: typeof entry.vehicleCategory === "string" ? entry.vehicleCategory : null,
-          ownerName: encryptOptional(typeof entry.ownerName === "string" ? entry.ownerName : null),
-          ownerContact: encryptOptional(typeof entry.ownerContact === "string" ? entry.ownerContact : null),
-          extendedCaseNotes: encryptOptional(typeof entry.extendedCaseNotes === "string" ? entry.extendedCaseNotes : null),
-        })),
+        create: normalizedEntries,
       },
     },
     include: { entries: true },

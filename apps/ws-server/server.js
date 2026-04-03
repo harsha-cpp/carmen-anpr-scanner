@@ -1,3 +1,4 @@
+const { timingSafeEqual } = require("node:crypto");
 const { WebSocketServer } = require("ws");
 const {
   connectDb,
@@ -24,34 +25,124 @@ const VEHICLE_API_KEY =
 const VEHICLE_API_BASE =
   process.env.VEHICLE_API_BASE ||
   "https://ap-southeast-1.api.carmencloud.com/vehicle";
-const WS_PORT = parseInt(process.env.WS_PORT || "3002");
+const parsedWsPort = parseInt(process.env.WS_PORT || "3002", 10);
+const WS_PORT = Number.isFinite(parsedWsPort) ? parsedWsPort : 3002;
+const WS_ADMIN_TOKEN = process.env.WS_ADMIN_TOKEN || "";
+const parsedDbRetryMs = parseInt(process.env.DB_RETRY_MS || "5000", 10);
+const DB_RETRY_MS =
+  Number.isFinite(parsedDbRetryMs) && parsedDbRetryMs > 0
+    ? parsedDbRetryMs
+    : 5000;
+const SHOULD_SEED_DUMMY_BLACKLIST =
+  process.env.SEED_DUMMY_BLACKLIST === "true";
 
 const DEDUP_MS = 8000;
 
 let blacklistCollection = null;
 let detectionsCollection = null;
 let db = null;
+let dbInitPromise = null;
+let dbRetryTimer = null;
+
+function resetDbState() {
+  db = null;
+  blacklistCollection = null;
+  detectionsCollection = null;
+}
+
+function clearDbRetryTimer() {
+  if (!dbRetryTimer) return;
+  clearTimeout(dbRetryTimer);
+  dbRetryTimer = null;
+}
+
+function scheduleDbRetry() {
+  if (dbRetryTimer) return;
+
+  console.log(`[db] retrying initialization in ${DB_RETRY_MS}ms`);
+  dbRetryTimer = setTimeout(() => {
+    dbRetryTimer = null;
+    void initDb().catch(() => {});
+  }, DB_RETRY_MS);
+}
+
+async function handleDbFailure(err, message) {
+  console.error(`${message}: ${err.message}`);
+  resetDbState();
+  await closeDb().catch(() => {});
+  scheduleDbRetry();
+}
 
 async function initDb() {
-  db = await connectDb();
-  blacklistCollection = await getBlacklistCollection();
-  detectionsCollection = await getDetectionsCollection();
-  const seedResult = await seedDummyBlacklist(db, blacklistCollection);
-  console.log(
-    `[db] connected ${DB_SCHEMA}.${BLACKLIST_COLLECTION} (seed inserted=${seedResult.inserted}, skipped=${seedResult.skipped})`,
-  );
-  console.log(`[db] connected ${DB_SCHEMA}.${DETECTIONS_COLLECTION}`);
+  if (db && blacklistCollection && detectionsCollection) return db;
+  if (dbInitPromise) return dbInitPromise;
+
+  dbInitPromise = (async () => {
+    const connection = await connectDb();
+    const blacklistTable = await getBlacklistCollection();
+    const detectionsTable = await getDetectionsCollection();
+
+    db = connection;
+    blacklistCollection = blacklistTable;
+    detectionsCollection = detectionsTable;
+
+    if (SHOULD_SEED_DUMMY_BLACKLIST) {
+      const seedResult = await seedDummyBlacklist(connection, blacklistTable);
+      console.log(
+        `[db] connected ${DB_SCHEMA}.${BLACKLIST_COLLECTION} (seed inserted=${seedResult.inserted}, skipped=${seedResult.skipped})`,
+      );
+    } else {
+      console.log(
+        `[db] connected ${DB_SCHEMA}.${BLACKLIST_COLLECTION} (demo seed disabled)`,
+      );
+    }
+
+    console.log(`[db] connected ${DB_SCHEMA}.${DETECTIONS_COLLECTION}`);
+    clearDbRetryTimer();
+    return connection;
+  })();
+
+  try {
+    return await dbInitPromise;
+  } catch (err) {
+    await handleDbFailure(err, "[db] failed to initialize DB");
+    throw err;
+  } finally {
+    dbInitPromise = null;
+  }
+}
+
+async function ensureDbReady() {
+  if (db && blacklistCollection && detectionsCollection) return true;
+
+  try {
+    await initDb();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function tokensMatch(expected, received) {
+  if (!expected || typeof received !== "string") return false;
+
+  const expectedBuf = Buffer.from(expected);
+  const receivedBuf = Buffer.from(received);
+
+  if (expectedBuf.length !== receivedBuf.length) return false;
+  return timingSafeEqual(expectedBuf, receivedBuf);
+}
+
+function privilegedAccessMessage() {
+  return WS_ADMIN_TOKEN
+    ? "Authentication required."
+    : "Privileged websocket access is disabled.";
 }
 
 const wss = new WebSocketServer({ port: WS_PORT });
 console.log(`Carmen ANPR WS server (Vehicle API) → ws://localhost:${WS_PORT}`);
 
-initDb().catch((err) => {
-  console.error(`[db] failed to initialize DB: ${err.message}`);
-  db = null;
-  blacklistCollection = null;
-  detectionsCollection = null;
-});
+void initDb().catch(() => {});
 
 process.on("SIGINT", async () => {
   await closeDb().catch(() => {});
@@ -70,6 +161,7 @@ wss.on("connection", (ws) => {
   let started = false;
   let stopped = false;
   let continuous = false;
+  let privileged = false;
   let processing = false;
   let queuedFrame = null;
   const lastSeen = new Map();
@@ -80,7 +172,27 @@ wss.on("connection", (ws) => {
     if (!isBinary) {
       try {
         const msg = JSON.parse(data.toString());
-        if (msg.type === "start" && !started) {
+        if (msg.type === "authenticate") {
+          if (!WS_ADMIN_TOKEN) {
+            ws.send(
+              JSON.stringify({
+                type: "auth",
+                success: false,
+                message: "Privileged websocket access is disabled.",
+              }),
+            );
+            return;
+          }
+
+          privileged = tokensMatch(WS_ADMIN_TOKEN, msg.token);
+          ws.send(
+            JSON.stringify({
+              type: "auth",
+              success: privileged,
+              message: privileged ? "Authenticated." : "Invalid websocket token.",
+            }),
+          );
+        } else if (msg.type === "start" && !started) {
           if (!VEHICLE_API_KEY) {
             ws.send(
               JSON.stringify({
@@ -98,7 +210,19 @@ wss.on("connection", (ws) => {
           console.log(`  session started, region=${region}, continuous=${continuous}`);
           ws.send(JSON.stringify({ type: "ready" }));
         } else if (msg.type === "getBlacklist") {
-          if (!db || !blacklistCollection) {
+          if (!privileged) {
+            ws.send(
+              JSON.stringify({
+                type: "blacklist",
+                success: false,
+                message: privilegedAccessMessage(),
+                data: [],
+              }),
+            );
+            return;
+          }
+
+          if (!(await ensureDbReady())) {
             ws.send(
               JSON.stringify({
                 type: "blacklist",
@@ -110,17 +234,41 @@ wss.on("connection", (ws) => {
             return;
           }
 
-          const data = await getBlacklistedPlates(db, blacklistCollection, 100);
-          ws.send(
-            JSON.stringify({
-              type: "blacklist",
-              success: true,
-              count: data.length,
-              data,
-            }),
-          );
+          try {
+            const data = await getBlacklistedPlates(db, blacklistCollection, 100);
+            ws.send(
+              JSON.stringify({
+                type: "blacklist",
+                success: true,
+                count: data.length,
+                data,
+              }),
+            );
+          } catch (err) {
+            await handleDbFailure(err, "[db] blacklist lookup failed");
+            ws.send(
+              JSON.stringify({
+                type: "blacklist",
+                success: false,
+                message: "Blacklist DB unavailable",
+                data: [],
+              }),
+            );
+          }
         } else if (msg.type === "getRecentDetections") {
-          if (!db || !detectionsCollection) {
+          if (!privileged) {
+            ws.send(
+              JSON.stringify({
+                type: "recentDetections",
+                success: false,
+                message: privilegedAccessMessage(),
+                data: [],
+              }),
+            );
+            return;
+          }
+
+          if (!(await ensureDbReady())) {
             ws.send(
               JSON.stringify({
                 type: "recentDetections",
@@ -134,19 +282,32 @@ wss.on("connection", (ws) => {
 
           const limit =
             Number(msg.limit) > 0 ? Math.min(Number(msg.limit), 500) : 100;
-          const data = await getRecentDetections(
-            db,
-            detectionsCollection,
-            limit,
-          );
-          ws.send(
-            JSON.stringify({
-              type: "recentDetections",
-              success: true,
-              count: data.length,
-              data,
-            }),
-          );
+
+          try {
+            const data = await getRecentDetections(
+              db,
+              detectionsCollection,
+              limit,
+            );
+            ws.send(
+              JSON.stringify({
+                type: "recentDetections",
+                success: true,
+                count: data.length,
+                data,
+              }),
+            );
+          } catch (err) {
+            await handleDbFailure(err, "[db] recent detections lookup failed");
+            ws.send(
+              JSON.stringify({
+                type: "recentDetections",
+                success: false,
+                message: "Detections DB unavailable",
+                data: [],
+              }),
+            );
+          }
         }
       } catch {}
       return;
@@ -195,6 +356,10 @@ wss.on("connection", (ws) => {
             record: null,
           };
 
+          if (!db || !blacklistCollection || !detectionsCollection) {
+            await ensureDbReady();
+          }
+
           if (db && blacklistCollection) {
             try {
               blacklist = await isPlateBlacklisted(
@@ -203,7 +368,7 @@ wss.on("connection", (ws) => {
                 det.plate,
               );
             } catch (err) {
-              console.error(`  blacklist check failed: ${err.message}`);
+              await handleDbFailure(err, "  blacklist check failed");
             }
           }
 
@@ -214,7 +379,7 @@ wss.on("connection", (ws) => {
                 blacklist,
               });
             } catch (err) {
-              console.error(`  detection save failed: ${err.message}`);
+              await handleDbFailure(err, "  detection save failed");
             }
           }
 

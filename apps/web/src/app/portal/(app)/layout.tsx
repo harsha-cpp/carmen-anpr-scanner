@@ -19,7 +19,6 @@ import {
   ListChecks,
   LogOut,
   Menu,
-  Radar,
   Search,
   Settings,
   Shield,
@@ -114,7 +113,6 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/portal/dashboard" },
-  { label: "Scanner", icon: Radar, href: "/portal/scan" },
   { label: "Cameras", icon: Camera, href: "/portal/cameras" },
   { label: "Alerts", icon: Bell, href: "/portal/alerts" },
   { label: "Search", icon: Search, href: "/portal/search" },

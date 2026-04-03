@@ -4,6 +4,7 @@ import type { AppBindings } from "../types.js";
 import { prisma } from "../lib/prisma.js";
 import { normalizePlate } from "../utils/plate.js";
 import { fail, ok } from "../utils/json.js";
+import { parseOptionalDateInput } from "../utils/date.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { createLogger } from "../lib/logger.js";
 
@@ -44,6 +45,11 @@ portalScanRoutes.post("/api/portal/scan", async (c) => {
     return fail(c, 400, "plate is required.");
   }
 
+  const occurredAt = parseOptionalDateInput(body.occurredAt);
+  if (occurredAt === undefined) {
+    return fail(c, 400, "occurredAt must be a valid ISO date string.");
+  }
+
   const workstationId = await getOrCreatePortalWorkstation();
   const externalEventId = `portal-${randomUUID()}`;
   const now = new Date();
@@ -53,7 +59,7 @@ portalScanRoutes.post("/api/portal/scan", async (c) => {
     data: {
       externalEventId,
       workstationId,
-      occurredAt: body.occurredAt ? new Date(body.occurredAt) : now,
+      occurredAt: occurredAt ?? now,
       plate,
       country: typeof body.country === "string" ? body.country : null,
       make: typeof body.make === "string" ? body.make : null,

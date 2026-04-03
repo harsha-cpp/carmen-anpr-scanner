@@ -49,16 +49,8 @@ export async function proxy(req: NextRequest) {
 
   const token = getSessionCookie(req);
 
+  // Scanner login is always accessible — lets users switch sessions
   if (pathname.startsWith("/scanner/login")) {
-    if (!token) return NextResponse.next();
-    const cookieHeader = req.headers.get("cookie") ?? "";
-    const role = await fetchRole(cookieHeader);
-    if (role === "scanner" || role === "admin") {
-      return NextResponse.redirect(new URL("/scanner/scan", req.url));
-    }
-    if (role === "operator") {
-      return NextResponse.redirect(new URL("/portal/dashboard", req.url));
-    }
     return NextResponse.next();
   }
 
@@ -104,7 +96,7 @@ export async function proxy(req: NextRequest) {
   }
 
   if (pathname.startsWith("/scanner")) {
-    return NextResponse.redirect(new URL("/portal/dashboard", req.url));
+    return NextResponse.next();
   }
 
   return NextResponse.next();

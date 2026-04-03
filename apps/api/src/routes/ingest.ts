@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppBindings } from "../types.js";
 import { prisma } from "../lib/prisma.js";
 import { fail, ok } from "../utils/json.js";
+import { parseOptionalDateInput } from "../utils/date.js";
 import { writeAuditLog } from "../lib/audit.js";
 
 export const ingestRoutes = new Hono<AppBindings>();
@@ -11,13 +12,18 @@ ingestRoutes.post("/api/ingest/detections", async (c) => {
   const body = await c.req.json();
   const externalEventId = typeof body.externalEventId === "string" ? body.externalEventId : "";
   const plate = typeof body.plate === "string" ? body.plate.trim() : "";
+  const occurredAt = parseOptionalDateInput(body.occurredAt);
 
   if (!device?.token.workstationId) {
     return fail(c, 400, "Detection ingest requires a workstation token.");
   }
 
-  if (!externalEventId || !plate || !body.occurredAt) {
+  if (!externalEventId || !plate || occurredAt === null) {
     return fail(c, 400, "externalEventId, plate, and occurredAt are required.");
+  }
+
+  if (occurredAt === undefined) {
+    return fail(c, 400, "occurredAt must be a valid ISO date string.");
   }
 
   const existing = await prisma.detection.findUnique({ where: { externalEventId } });
@@ -30,7 +36,7 @@ ingestRoutes.post("/api/ingest/detections", async (c) => {
       externalEventId,
       workstationId: device.token.workstationId,
       hitlistId: typeof body.hitlistId === "string" ? body.hitlistId : null,
-      occurredAt: new Date(body.occurredAt),
+      occurredAt,
       plate,
       country: typeof body.country === "string" ? body.country : null,
       make: typeof body.make === "string" ? body.make : null,

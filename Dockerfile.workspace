@@ -1,0 +1,24 @@
+FROM node:24-bookworm
+
+ENV PNPM_HOME=/pnpm
+ENV PNPM_STORE_DIR=/pnpm/store
+ENV PATH=/pnpm:$PATH
+
+RUN corepack enable
+
+WORKDIR /workspace
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/api/prisma apps/api/prisma
+COPY apps/web/package.json apps/web/package.json
+COPY apps/ws-server/package.json apps/ws-server/package.json
+
+RUN pnpm install --no-frozen-lockfile \
+  --filter @adarecog/api \
+  --filter @adarecog/web \
+  --filter @adarecog/ws-server
+
+COPY . .
+
+RUN pnpm --filter @adarecog/api run prisma:generate

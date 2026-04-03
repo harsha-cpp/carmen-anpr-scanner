@@ -1,6 +1,9 @@
 import { prisma } from "./prisma.js";
 import { createLogger } from "./logger.js";
-import { broadcastToTablets, sendToWorkstationTablets, getConnectedTabletCount } from "./tablet-sessions.js";
+import {
+  sendToTabletIds,
+  sendToWorkstationConnections,
+} from "./tablet-sessions.js";
 
 const logger = createLogger("outbox-processor");
 
@@ -17,6 +20,20 @@ function retryDelay(attempts: number): number {
   const delay = Math.min(BASE_RETRY_DELAY_MS * Math.pow(2, attempts), MAX_RETRY_DELAY_MS);
   const jitter = delay * 0.2 * Math.random();
   return Math.floor(delay + jitter);
+}
+
+async function getActivePairedTabletIds(workstationId: string): Promise<string[]> {
+  const pairings = await prisma.devicePairing.findMany({
+    where: {
+      workstationId,
+      unpairedAt: null,
+    },
+    select: {
+      tabletId: true,
+    },
+  });
+
+  return pairings.map((pairing) => pairing.tabletId);
 }
 
 async function processBatch(): Promise<number> {
@@ -42,8 +59,6 @@ async function processBatch(): Promise<number> {
     });
 
     try {
-      let delivered = 0;
-
       if (job.topic === "match-event.created") {
         const matchEvent = await prisma.matchEvent.findUnique({
           where: { id: job.aggregateId },
@@ -61,6 +76,9 @@ async function processBatch(): Promise<number> {
         });
 
         if (matchEvent) {
+          const pairedTabletIds = await getActivePairedTabletIds(
+            matchEvent.workstationId,
+          );
           const eventData = JSON.stringify({
             type: "match-event",
             id: matchEvent.id,
@@ -71,44 +89,37 @@ async function processBatch(): Promise<number> {
             createdAt: matchEvent.createdAt.toISOString(),
           });
 
-          delivered = sendToWorkstationTablets(matchEvent.workstationId, "match-event", eventData);
+          const deliveredToWorkstation = sendToWorkstationConnections(
+            matchEvent.workstationId,
+            "match-event",
+            eventData,
+          );
+          const deliveredToTablets = sendToTabletIds(
+            pairedTabletIds,
+            "match-event",
+            eventData,
+          );
 
-          if (delivered === 0 && getConnectedTabletCount() > 0) {
-            delivered = broadcastToTablets("match-event", eventData);
-          }
-        }
-      } else if (job.topic === "detection.created") {
-        delivered = 0;
-      }
-
-      if (delivered > 0 || getConnectedTabletCount() === 0) {
-        await prisma.outboxJob.update({
-          where: { id: job.id },
-          data: {
-            status: "SENT",
-            attempts: job.attempts + 1,
-          },
-        });
-      } else {
-        const nextAttempts = job.attempts + 1;
-        if (nextAttempts >= MAX_ATTEMPTS) {
-          await prisma.outboxJob.update({
-            where: { id: job.id },
-            data: { status: "FAILED", attempts: nextAttempts },
-          });
-          logger.warn({ jobId: job.id, topic: job.topic }, "outbox job dead-lettered");
+          logger.debug({
+            jobId: job.id,
+            matchEventId: matchEvent.id,
+            workstationId: matchEvent.workstationId,
+            pairedTabletCount: pairedTabletIds.length,
+            deliveredToWorkstation,
+            deliveredToTablets,
+          }, "match event dispatched");
         } else {
-          const nextAvailable = new Date(Date.now() + retryDelay(nextAttempts));
-          await prisma.outboxJob.update({
-            where: { id: job.id },
-            data: {
-              status: "PENDING",
-              attempts: nextAttempts,
-              availableAt: nextAvailable,
-            },
-          });
+          logger.warn({ jobId: job.id, aggregateId: job.aggregateId }, "match event missing for outbox job");
         }
       }
+
+      await prisma.outboxJob.update({
+        where: { id: job.id },
+        data: {
+          status: "SENT",
+          attempts: job.attempts + 1,
+        },
+      });
 
       processed++;
     } catch (err) {

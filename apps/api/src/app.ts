@@ -38,6 +38,7 @@ export function createApp() {
   app.on(["GET", "POST"], "/api/auth/*", authRateLimit, (c) => auth.handler(c.req.raw));
 
   app.route("/", healthRoutes);
+  app.use("/metrics", requireUser, requireRole("admin"));
   app.route("/", metricsRoutes);
   app.route("/", eventRoutes);
 

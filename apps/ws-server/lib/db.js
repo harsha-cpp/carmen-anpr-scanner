@@ -9,6 +9,7 @@ const BLACKLIST_COLLECTION =
 const DETECTIONS_COLLECTION = process.env.DETECTIONS_COLLECTION || "detections";
 
 let pool;
+let connectPromise = null;
 
 function tableRef(tableName) {
   return `"${DB_SCHEMA}"."${tableName}"`;
@@ -16,12 +17,28 @@ function tableRef(tableName) {
 
 async function connectDb() {
   if (pool) return pool;
+  if (connectPromise) return connectPromise;
 
-  pool = new Pool({ connectionString: POSTGRES_URL });
-  await pool.query("SELECT 1");
-  await ensureSchema();
+  const nextPool = new Pool({ connectionString: POSTGRES_URL });
 
-  return pool;
+  connectPromise = (async () => {
+    try {
+      await nextPool.query("SELECT 1");
+      pool = nextPool;
+      await ensureSchema();
+      return pool;
+    } catch (err) {
+      await nextPool.end().catch(() => {});
+      if (pool === nextPool) {
+        pool = null;
+      }
+      throw err;
+    } finally {
+      connectPromise = null;
+    }
+  })();
+
+  return connectPromise;
 }
 
 async function ensureSchema() {

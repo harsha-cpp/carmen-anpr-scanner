@@ -11,6 +11,32 @@ const logger = createLogger("events");
 
 export const eventRoutes = new Hono<AppBindings>();
 
+async function getAuthorizedWorkstationIds(deviceToken: {
+  deviceType: "WORKSTATION" | "TABLET";
+  workstationId: string | null;
+  tabletId: string | null;
+}): Promise<string[]> {
+  if (deviceToken.deviceType === "WORKSTATION") {
+    return deviceToken.workstationId ? [deviceToken.workstationId] : [];
+  }
+
+  if (!deviceToken.tabletId) {
+    return [];
+  }
+
+  const pairings = await prisma.devicePairing.findMany({
+    where: {
+      tabletId: deviceToken.tabletId,
+      unpairedAt: null,
+    },
+    select: {
+      workstationId: true,
+    },
+  });
+
+  return pairings.map((pairing) => pairing.workstationId);
+}
+
 eventRoutes.get("/api/events/stream", async (c) => {
   const token = c.req.header("x-device-token") ?? c.req.query("token");
   if (!token) {
@@ -38,6 +64,11 @@ eventRoutes.get("/api/events/stream", async (c) => {
 
   const sinceParam = c.req.query("since");
   const since = sinceParam ? new Date(sinceParam) : null;
+  const authorizedWorkstationIds = await getAuthorizedWorkstationIds({
+    deviceType: deviceToken.deviceType,
+    workstationId: deviceToken.workstationId,
+    tabletId: deviceToken.tabletId,
+  });
 
   logger.info({ deviceKey, deviceType: deviceToken.deviceType }, "SSE stream opened");
 
@@ -58,6 +89,7 @@ eventRoutes.get("/api/events/stream", async (c) => {
 
     registerTablet({
       deviceKey,
+      deviceType: deviceToken.deviceType,
       workstationId: deviceToken.workstationId,
       tabletId: deviceToken.tabletId,
       connectedAt: new Date(),
@@ -67,41 +99,48 @@ eventRoutes.get("/api/events/stream", async (c) => {
     });
 
     if (since && !Number.isNaN(since.getTime())) {
-      const missedJobs = await prisma.outboxJob.findMany({
-        where: {
-          topic: "match-event.created",
-          createdAt: { gt: since },
-          status: { in: ["SENT", "PENDING", "PROCESSING"] },
-        },
-        orderBy: { createdAt: "asc" },
-        take: 200,
-      });
+      const missedEvents =
+        authorizedWorkstationIds.length === 0
+          ? []
+          : await prisma.matchEvent.findMany({
+              where: {
+                createdAt: { gt: since },
+                workstationId: { in: authorizedWorkstationIds },
+              },
+              include: {
+                detection: {
+                  select: {
+                    plate: true,
+                    country: true,
+                    occurredAt: true,
+                    snapshotUrl: true,
+                  },
+                },
+                hitlistEntry: {
+                  select: {
+                    plateOriginal: true,
+                    reasonSummary: true,
+                    priority: true,
+                  },
+                },
+              },
+              orderBy: { createdAt: "asc" },
+              take: 200,
+            });
 
-      for (const job of missedJobs) {
+      for (const matchEvent of missedEvents) {
         if (closed) break;
-        const matchEvent = await prisma.matchEvent.findUnique({
-          where: { id: job.aggregateId },
-          include: {
-            detection: {
-              select: { plate: true, country: true, occurredAt: true, snapshotUrl: true },
-            },
-            hitlistEntry: {
-              select: { plateOriginal: true, reasonSummary: true, priority: true },
-            },
-          },
+
+        const eventData = JSON.stringify({
+          type: "match-event",
+          id: matchEvent.id,
+          workstationId: matchEvent.workstationId,
+          alertStatus: matchEvent.alertStatus,
+          detection: matchEvent.detection,
+          hitlistEntry: matchEvent.hitlistEntry,
+          createdAt: matchEvent.createdAt.toISOString(),
         });
-        if (matchEvent) {
-          const eventData = JSON.stringify({
-            type: "match-event",
-            id: matchEvent.id,
-            workstationId: matchEvent.workstationId,
-            alertStatus: matchEvent.alertStatus,
-            detection: matchEvent.detection,
-            hitlistEntry: matchEvent.hitlistEntry,
-            createdAt: matchEvent.createdAt.toISOString(),
-          });
-          await stream.writeSSE({ event: "match-event", data: eventData });
-        }
+        await stream.writeSSE({ event: "match-event", data: eventData });
       }
 
       await stream.writeSSE({ event: "replay-complete", data: JSON.stringify({ since: sinceParam }) });

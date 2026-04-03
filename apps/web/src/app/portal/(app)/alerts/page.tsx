@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -178,6 +178,7 @@ export default function AlertsPage() {
   const [total, setTotal] = useState(0);
   const [actionState, setActionState] = useState<{ eventId: string; nextStatus: ActionStatus; note: string } | null>(null);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
+  const loadRequestIdRef = useRef(0);
 
   const hasMore = events.length < total;
 
@@ -197,25 +198,32 @@ export default function AlertsPage() {
   }, []);
 
   const loadInitial = useCallback(async (status: MatchStatus) => {
+    const requestId = ++loadRequestIdRef.current;
     setLoading(true);
+    setLoadingMore(false);
+    setRefreshing(false);
     setError(null);
     try {
       const [pageData, statsData] = await Promise.all([fetchPage(status, 1), fetchStats()]);
+      if (requestId !== loadRequestIdRef.current) return;
       setEvents(pageData.items);
       setPage(pageData.page);
       setTotal(pageData.total);
       setStats(statsData);
     } catch (err) {
+      if (requestId !== loadRequestIdRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to load alerts");
       setEvents([]);
       setTotal(0);
       setStats(null);
     } finally {
+      if (requestId !== loadRequestIdRef.current) return;
       setLoading(false);
     }
   }, [fetchPage, fetchStats]);
 
   const refreshLoadedPages = useCallback(async () => {
+    const requestId = loadRequestIdRef.current;
     setRefreshing(true);
     setError(null);
     try {
@@ -225,12 +233,14 @@ export default function AlertsPage() {
       );
       const latest = pageResults[pageResults.length - 1];
       const statsData = await fetchStats();
+      if (requestId !== loadRequestIdRef.current) return;
 
       setEvents(pageResults.flatMap((result) => result.items));
       setPage(latest.page);
       setTotal(latest.total);
       setStats(statsData);
     } catch (err) {
+      if (requestId !== loadRequestIdRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to refresh alerts");
     } finally {
       setRefreshing(false);
@@ -250,15 +260,18 @@ export default function AlertsPage() {
   async function handleLoadMore() {
     if (loadingMore || !hasMore) return;
 
+    const requestId = loadRequestIdRef.current;
     setLoadingMore(true);
     setError(null);
     try {
       const nextPage = page + 1;
       const pageData = await fetchPage(activeTab, nextPage);
+      if (requestId !== loadRequestIdRef.current) return;
       setEvents((current) => [...current, ...pageData.items]);
       setPage(pageData.page);
       setTotal(pageData.total);
     } catch (err) {
+      if (requestId !== loadRequestIdRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to load more alerts");
     } finally {
       setLoadingMore(false);
