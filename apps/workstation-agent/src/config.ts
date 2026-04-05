@@ -69,5 +69,21 @@ export function loadConfig(): WorkstationConfig {
     tabletWsPort: int("TABLET_WS_PORT", 8089),
     ttsEnabled: bool("TTS_ENABLED", true),
     logLevel: optional("LOG_LEVEL", "info"),
+    rtspTransport: optional("RTSP_TRANSPORT", "tcp"),
+    rtspConnectTimeoutMs: int("RTSP_CONNECT_TIMEOUT_MS", 10000),
+    rtspReadTimeoutMs: int("RTSP_READ_TIMEOUT_MS", 20000),
+    rtspReconnectMaxAttemptsPerSession: int("RTSP_RECONNECT_MAX_ATTEMPTS", 5),
+    rtspStreamValidationIntervalMs: int("RTSP_STREAM_VALIDATION_INTERVAL_MS", 30000),
+    cameraSources: parseCameraSources(optional("CAMERA_SOURCES_JSON", "")),
   });
+}
+
+function parseCameraSources(json: string): Array<{ url: string; label: string; fps: number }> {
+  if (!json.trim()) return [];
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }

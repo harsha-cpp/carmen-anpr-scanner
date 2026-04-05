@@ -299,4 +299,10 @@ export interface WorkstationConfig {
   tabletWsPort: number;
   ttsEnabled: boolean;
   logLevel: string;
+  rtspTransport: "tcp" | "udp" | "http";
+  rtspConnectTimeoutMs: number;
+  rtspReadTimeoutMs: number;
+  rtspReconnectMaxAttemptsPerSession: number;
+  rtspStreamValidationIntervalMs: number;
+  cameraSources: Array<{ url: string; label: string; fps: number }>;
 }
