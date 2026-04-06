@@ -78,7 +78,7 @@ export function loadConfig(): WorkstationConfig {
     ocrMinConfidence: float("OCR_MIN_CONFIDENCE", 0.55),
     ocrWorkerCount: int("OCR_WORKER_COUNT", 2),
     logLevel: optional("LOG_LEVEL", "info"),
-    rtspTransport: optional("RTSP_TRANSPORT", "tcp"),
+    rtspTransport: optional("RTSP_TRANSPORT", "tcp") as "tcp" | "udp" | "http",
     rtspConnectTimeoutMs: int("RTSP_CONNECT_TIMEOUT_MS", 10000),
     rtspReadTimeoutMs: int("RTSP_READ_TIMEOUT_MS", 20000),
     rtspReconnectMaxAttemptsPerSession: int("RTSP_RECONNECT_MAX_ATTEMPTS", 5),

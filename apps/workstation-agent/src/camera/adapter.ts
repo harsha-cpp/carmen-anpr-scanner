@@ -21,40 +21,6 @@ function ffmpegStreamArgs(source: string, fps: number): string[] {
     "-an", "-vf", `fps=${fps}`,
     "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1",
   ];
-
-  // RTSP-specific options
-  if (isRtspSource(source)) {
-    // Transport protocol
-    args.push("-rtsp_transport", config.rtspTransport);
-    
-    // Connection and read timeouts (in seconds, converted from ms)
-    const connectTimeoutS = Math.max(1, Math.floor(config.rtspConnectTimeoutMs / 1000));
-    const readTimeoutS = Math.max(1, Math.floor(config.rtspReadTimeoutMs / 1000));
-    
-    args.push(
-      "-connect_timeout", String(connectTimeoutS * 1_000_000), // microseconds
-      "-read_timeout", String(readTimeoutS * 1_000_000), // microseconds
-    );
-    
-    // Additional RTSP options
-    args.push(
-      "-stimeout", String(readTimeoutS * 1_000_000), // stream timeout in microseconds
-      "-fflags", "nobuffer", // minimize buffering for lower latency
-      "-flags", "low_delay", // low delay mode
-    );
-  }
-
-  // Common arguments for frame capture
-  args.push(
-    "-i", source,
-    "-an", // no audio
-    "-frames:v", "1", // single frame
-    "-f", "image2pipe",
-    "-vcodec", "mjpeg",
-    "pipe:1",
-  );
-
-  return args;
 }
 
 export class CameraAdapter {
@@ -73,13 +39,6 @@ export class CameraAdapter {
 
   public constructor(config: CameraAdapterConfig = loadConfig()) {
     this.config = config;
-    this.rtspStats = {
-      connectionAttempts: 0,
-      lastConnectionError: null,
-      bytesReceived: 0,
-      framesCaptured: 0,
-      lastValidFrameAt: null,
-    };
   }
 
   public async start(onFrame?: FrameHandler): Promise<void> {
@@ -123,14 +82,6 @@ export class CameraAdapter {
       : this.connected && isFresh
         ? "camera frames are flowing"
         : this.lastError ?? "camera capture is stale";
-
-    // Add RTSP-specific health details
-    if (isRtspSource(this.config.cameraSource)) {
-      message += ` [RTSP: ${this.rtspStats.framesCaptured} frames, ${this.rtspStats.connectionAttempts} attempts]`;
-      if (this.rtspStats.lastConnectionError) {
-        message += ` Last error: ${this.rtspStats.lastConnectionError}`;
-      }
-    }
 
     return { component: "camera", status, message, lastCheckedAt: now.toISOString() };
   }

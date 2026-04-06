@@ -45,5 +45,5 @@ apps/workstation-agent/data/
 # docx
 *.docx
 
-# plan (local only)
-PLAN.md
+# sisyphus plans (local only)
+.sisyphus/plans/

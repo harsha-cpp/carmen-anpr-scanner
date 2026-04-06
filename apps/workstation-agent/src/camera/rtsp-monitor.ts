@@ -359,7 +359,7 @@ export class RtspMonitor {
 
     for (const streamId of this.streams.keys()) {
       const diag = this.getDiagnostics(streamId);
-      diagnostics.streams = { ...diagnostics.streams, [streamId]: diag };
+      (diagnostics.streams as Record<string, unknown>)[streamId] = diag;
     }
 
     return diagnostics;
