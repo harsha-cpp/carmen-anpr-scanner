@@ -6,9 +6,12 @@ import { CentralApiClient } from "./api/client.js";
 import { loadConfig } from "./config.js";
 import { DbClient } from "./db/client.js";
 import { HeartbeatService } from "./health/heartbeat.js";
+import { PlateMatcher } from "./detection/matcher.js";
+import { HitlistDownloader } from "./hitlist/downloader.js";
 import { createLogger, setLogLevel } from "./logger.js";
 import { OutboxFlusher } from "./sync/outbox.js";
 import { TabletBridge } from "./tablet/bridge.js";
+import { TtsAnnouncer } from "./alert/tts.js";
 import type {
   AlertPayload,
   CameraFrame,
@@ -27,7 +30,7 @@ interface CameraAdapter {
   start(): Promise<void>;
   stop(): Promise<void>;
   grabFrame(): Promise<CameraFrame>;
-  healthCheck(): Promise<{ ok: boolean; message: string }>;
+  healthCheck(): Promise<ComponentHealth>;
 }
 
 interface CameraAdapterModule {
@@ -156,33 +159,6 @@ async function bootstrapDeviceToken(api: CentralApiClient, config: WorkstationCo
   return registration.deviceToken;
 }
 
-async function saveDetectionSnapshot(
-  saveSnapshot: SnapshotModule["saveSnapshot"],
-  db: DbClient,
-  config: WorkstationConfig,
-  frame: CameraFrame,
-  detectionId: string,
-): Promise<string | null> {
-  const attempts: unknown[][] = [
-    [{ db, config, frame, detectionId }],
-    [db, config, frame, detectionId],
-    [frame, detectionId, db, config],
-  ];
-
-  for (const args of attempts) {
-    try {
-      const result = await saveSnapshot(...args);
-      return extractSnapshotPath(result);
-    } catch (error) {
-      logger.warn("snapshot capture attempt failed", {
-        detectionId,
-        error: toErrorMessage(error),
-      });
-    }
-  }
-
-  return null;
-}
 
 async function cleanupSnapshots(
   cleanExpiredSnapshots: SnapshotModule["cleanExpiredSnapshots"],
@@ -218,7 +194,7 @@ async function updateRuntimeHealthSnapshots(db: DbClient, camera: CameraAdapter,
     const cameraHealth = await camera.healthCheck();
     db.upsertHealthSnapshot({
       component: "camera",
-      status: toComponentStatus(cameraHealth.ok),
+      status: cameraHealth.status,
       message: cameraHealth.message,
       lastCheckedAt: now,
     });
@@ -249,99 +225,9 @@ async function updateRuntimeHealthSnapshots(db: DbClient, camera: CameraAdapter,
   }
 }
 
-class HitlistDownloader {
-  private readonly logger = createLogger("hitlist-downloader");
 
-  public constructor(
-    private readonly api: CentralApiClient,
-    private readonly db: DbClient,
-    private readonly hitlistId: string | null,
-  ) {}
 
-  public async sync(): Promise<number> {
-    if (!this.hitlistId) {
-      this.logger.warn("hitlist sync skipped; HITLIST_ID not configured");
-      return 0;
-    }
 
-    const cursor = this.db.getSyncCursor("HITLIST");
-    const sinceVersion = cursor ? Number.parseInt(cursor.cursor, 10) : undefined;
-    const response = await this.api.getHitlist(
-      this.hitlistId,
-      typeof sinceVersion === "number" && Number.isFinite(sinceVersion) ? sinceVersion : undefined,
-    );
-
-    if (!response.changed || !response.version) {
-      this.db.setSyncCursor("HITLIST", String(response.currentVersionNumber));
-      this.logger.debug("hitlist already current", {
-        hitlistId: this.hitlistId,
-        version: response.currentVersionNumber,
-      });
-      return 0;
-    }
-
-    this.db.clearHitlistEntries(this.hitlistId);
-    const syncedAt = new Date().toISOString();
-
-    for (const entry of response.version.entries) {
-      this.db.upsertHitlistEntry({
-        id: entry.id,
-        hitlistId: response.hitlistId,
-        plateOriginal: entry.plateOriginal,
-        plateNormalized: entry.plateNormalized,
-        countryOrRegion: entry.countryOrRegion,
-        priority: entry.priority,
-        status: entry.status,
-        validFrom: entry.validFrom,
-        validUntil: entry.validUntil,
-        reasonSummary: entry.reasonSummary,
-        vehicleMake: entry.vehicleMake,
-        vehicleModel: entry.vehicleModel,
-        vehicleColor: entry.vehicleColor,
-        metadata: entry.tags ? JSON.stringify(entry.tags) : null,
-        syncedAt,
-      });
-    }
-
-    this.db.setSyncCursor("HITLIST", String(response.currentVersionNumber), syncedAt);
-    this.logger.info("hitlist synced", {
-      hitlistId: this.hitlistId,
-      version: response.currentVersionNumber,
-      entries: response.version.entries.length,
-    });
-
-    return response.version.entries.length;
-  }
-}
-
-class PlateMatcher {
-  public constructor(private readonly db: DbClient) {}
-
-  public match(plate: string): MatchResult {
-    const normalizedPlate = normalizePlate(plate);
-    const entries = normalizedPlate ? this.db.findMatchingEntries(normalizedPlate) : [];
-
-    return {
-      matched: entries.length > 0,
-      entries,
-      normalizedPlate,
-    };
-  }
-}
-
-class TtsAnnouncer {
-  private readonly logger = createLogger("tts-announcer");
-
-  public constructor(private readonly enabled: boolean) {}
-
-  public async announce(message: string): Promise<void> {
-    if (!this.enabled) {
-      return;
-    }
-
-    this.logger.info("tts announcement", { message });
-  }
-}
 
 class Alerter {
   public constructor(
@@ -381,11 +267,12 @@ export async function main(): Promise<void> {
   await bootstrapDeviceToken(api, config);
 
   const runtimeModules = await loadRuntimeModules();
-  const hitlistDownloader = new HitlistDownloader(api, db, process.env.HITLIST_ID?.trim() || null);
-  const plateMatcher = new PlateMatcher(db);
+  const hitlistId = process.env.HITLIST_ID?.trim() ?? null;
+  const hitlistDownloader = new HitlistDownloader(api, db);
+  const plateMatcher = new PlateMatcher(db, config.fuzzyMatchEnabled);
   const outboxFlusher = new OutboxFlusher(api, db, config);
   const heartbeatService = new HeartbeatService(api, db, config);
-  const ttsAnnouncer = new TtsAnnouncer(config.ttsEnabled);
+  const ttsAnnouncer = new TtsAnnouncer(config);
   const tabletBridge = new TabletBridge(config);
   const alerter = new Alerter(tabletBridge, ttsAnnouncer);
   const camera = new runtimeModules.FfmpegCameraAdapter(config);
@@ -461,7 +348,7 @@ export async function main(): Promise<void> {
     await ocr.initialize();
     await camera.start();
     await updateRuntimeHealthSnapshots(db, camera, ocr);
-    await hitlistDownloader.sync();
+    await hitlistDownloader.syncAll(hitlistId ? [hitlistId] : []);
 
     await runSerialized("heartbeat", "heartbeat", async () => {
       await heartbeatService.sendHeartbeat();
@@ -471,7 +358,7 @@ export async function main(): Promise<void> {
     timerHandles.push(
       setInterval(() => {
         void runSerialized("hitlist", "hitlist sync", async () => {
-          await hitlistDownloader.sync();
+          await hitlistDownloader.syncAll(hitlistId ? [hitlistId] : []);
         });
       }, config.hitlistSyncIntervalMs),
     );
@@ -529,13 +416,11 @@ export async function main(): Promise<void> {
           const now = frame.timestamp.toISOString();
           const primaryEntry = match.entries[0];
           const detectionId = randomUUID();
-          const snapshotPath = await saveDetectionSnapshot(
-            runtimeModules.saveSnapshot,
-            db,
-            config,
-            frame,
-            detectionId,
-          );
+          const snapshotResult = await runtimeModules.saveSnapshot(frame.data, config).catch((err: unknown) => {
+            logger.warn("snapshot capture failed", { detectionId, error: toErrorMessage(err) });
+            return null;
+          });
+          const snapshotPath = extractSnapshotPath(snapshotResult);
 
           const pendingDetection: PendingDetection = {
             id: detectionId,

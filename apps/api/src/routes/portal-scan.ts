@@ -15,22 +15,16 @@ export const portalScanRoutes = new Hono<AppBindings>();
 const PORTAL_SCANNER_DEVICE_ID = "portal-scanner";
 
 async function getOrCreatePortalWorkstation(): Promise<string> {
-  const existing = await prisma.workstation.findUnique({
+  const ws = await prisma.workstation.upsert({
     where: { deviceId: PORTAL_SCANNER_DEVICE_ID },
-  });
-
-  if (existing) return existing.id;
-
-  const ws = await prisma.workstation.create({
-    data: {
+    update: {},
+    create: {
       deviceId: PORTAL_SCANNER_DEVICE_ID,
       name: "Portal Scanner",
       description: "Virtual workstation for browser-based scanning",
       status: "ACTIVE",
     },
   });
-
-  logger.info({ workstationId: ws.id }, "created portal scanner workstation");
   return ws.id;
 }
 
@@ -80,34 +74,23 @@ portalScanRoutes.post("/api/portal/scan", async (c) => {
     },
   });
 
-  const activeHitlists = await prisma.hitlist.findMany({
-    where: { status: "ACTIVE" },
-    select: { id: true, currentVersionNumber: true },
+  const matchingEntries = await prisma.hitlistEntry.findMany({
+    where: {
+      plateNormalized: normalizedPlate,
+      status: "active",
+      hitlistVersion: {
+        hitlist: { status: "ACTIVE" },
+      },
+    },
+    select: {
+      id: true,
+      plateOriginal: true,
+      priority: true,
+      reasonSummary: true,
+      caseReference: true,
+      sourceAgency: true,
+    },
   });
-
-  const matchingEntries = [];
-
-  for (const hl of activeHitlists) {
-    const entries = await prisma.hitlistEntry.findMany({
-      where: {
-        plateNormalized: normalizedPlate,
-        status: "active",
-        hitlistVersion: {
-          hitlistId: hl.id,
-          versionNumber: hl.currentVersionNumber,
-        },
-      },
-      select: {
-        id: true,
-        plateOriginal: true,
-        priority: true,
-        reasonSummary: true,
-        caseReference: true,
-        sourceAgency: true,
-      },
-    });
-    matchingEntries.push(...entries);
-  }
 
   const matchEvents = [];
 
@@ -146,6 +129,8 @@ portalScanRoutes.post("/api/portal/scan", async (c) => {
       hitlistEntry: entry,
     });
   }
+
+  await prisma.$executeRaw`SELECT pg_notify('outbox_new_job', 'trigger')`;
 
   await writeAuditLog({
     actorUser: user,

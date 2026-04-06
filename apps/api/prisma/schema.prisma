@@ -303,6 +303,8 @@ model MatchEvent {
   hitlistEntry    HitlistEntry?  @relation(fields: [hitlistEntryId], references: [id], onDelete: SetNull)
   evidenceSnapshots EvidenceSnapshot[]
 
+  @@index([workstationId, createdAt])
+  @@index([createdAt])
   @@map("match_events")
 }
 
@@ -377,4 +379,12 @@ model AuditLog {
 
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+model RateLimitEntry {
+  key     String   @id
+  count   Int      @default(0)
+  resetAt DateTime
+
+  @@map("rate_limit_entries")
 }
