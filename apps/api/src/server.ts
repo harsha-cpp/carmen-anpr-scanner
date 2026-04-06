@@ -14,6 +14,8 @@ serve(
   },
   (info) => {
     logger.info({ port: info.port, env: config.nodeEnv }, "apps/api started");
-    startOutboxProcessor();
+    startOutboxProcessor().catch((err) => {
+      logger.error({ err }, "failed to start outbox processor");
+    });
   },
 );

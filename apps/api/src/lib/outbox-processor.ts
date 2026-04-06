@@ -157,11 +157,19 @@ async function poll(): Promise<void> {
   }
 }
 
-export function startOutboxProcessor(): void {
+export async function startOutboxProcessor(): Promise<void> {
   if (running) return;
   running = true;
+
+  // Reset any jobs stuck in PROCESSING from a previous crash
+  await prisma.outboxJob.updateMany({
+    where: { status: "PROCESSING" },
+    data: { status: "PENDING", availableAt: new Date() },
+  });
+  logger.info("stale PROCESSING jobs reset to PENDING");
+
   logger.info({ pollIntervalMs: POLL_INTERVAL_MS, batchSize: BATCH_SIZE }, "outbox processor started");
-  poll();
+  void poll();
 }
 
 export function stopOutboxProcessor(): void {
