@@ -159,33 +159,6 @@ async function bootstrapDeviceToken(api: CentralApiClient, config: WorkstationCo
   return registration.deviceToken;
 }
 
-async function saveDetectionSnapshot(
-  saveSnapshot: SnapshotModule["saveSnapshot"],
-  db: DbClient,
-  config: WorkstationConfig,
-  frame: CameraFrame,
-  detectionId: string,
-): Promise<string | null> {
-  const attempts: unknown[][] = [
-    [{ db, config, frame, detectionId }],
-    [db, config, frame, detectionId],
-    [frame, detectionId, db, config],
-  ];
-
-  for (const args of attempts) {
-    try {
-      const result = await saveSnapshot(...args);
-      return extractSnapshotPath(result);
-    } catch (error) {
-      logger.warn("snapshot capture attempt failed", {
-        detectionId,
-        error: toErrorMessage(error),
-      });
-    }
-  }
-
-  return null;
-}
 
 async function cleanupSnapshots(
   cleanExpiredSnapshots: SnapshotModule["cleanExpiredSnapshots"],
@@ -443,13 +416,11 @@ export async function main(): Promise<void> {
           const now = frame.timestamp.toISOString();
           const primaryEntry = match.entries[0];
           const detectionId = randomUUID();
-          const snapshotPath = await saveDetectionSnapshot(
-            runtimeModules.saveSnapshot,
-            db,
-            config,
-            frame,
-            detectionId,
-          );
+          const snapshotResult = await runtimeModules.saveSnapshot(frame.data, config).catch((err: unknown) => {
+            logger.warn("snapshot capture failed", { detectionId, error: toErrorMessage(err) });
+            return null;
+          });
+          const snapshotPath = extractSnapshotPath(snapshotResult);
 
           const pendingDetection: PendingDetection = {
             id: detectionId,
