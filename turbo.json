@@ -6,13 +6,17 @@
       "persistent": true
     },
     "build": {
-      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"],
+      "cache": true
     },
     "test": {
+      "dependsOn": ["^build", "typecheck"],
       "cache": false
     },
     "typecheck": {
-      "cache": false
+      "dependsOn": ["^typecheck"],
+      "cache": true
     }
   }
 }
