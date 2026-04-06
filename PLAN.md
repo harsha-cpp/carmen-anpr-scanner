@@ -114,25 +114,25 @@ Every vehicle scanned is stored in the central server, not just hit list matches
 
 ### What Does Not Exist
 
-1. **Tablet app** - no `apps/tablet` directory exists. The WebSocket bridge on the workstation is built, but there is no client consuming it.
+1. ~~**Tablet app**~~ ✅ **DONE** — `apps/tablet` built in Phase 3. WebSocket client, 7 screens, PWA manifest.
 
-2. **Store all scans** - the workstation currently skips non-matching plates entirely (`main.ts` line 411: `if (!match.matched) { continue; }`). Only plates that match the hit list are stored and synced. The user requires every scanned plate to be logged.
+2. ~~**Store all scans**~~ ✅ **DONE** — Phase 1 complete. All OCR detections stored and synced regardless of match.
 
-3. **Hit list assignment per workstation** - hit lists are global. Any workstation can sync any active hit list. There is no assignment model (which hit list goes to which workstation).
+3. ~~**Hit list assignment per workstation**~~ ✅ **DONE** — Phase 2 complete. `HitlistAssignment` model, assignment API endpoints, workstation fetches assigned lists from API, portal assignment UI.
 
-4. **Workstation startup flow on tablet** - the workstation boots headless. There is no UI showing startup checks (camera OK, OCR OK, connectivity OK) to the operator. Health data exists internally but is not surfaced to a tablet.
+4. **Workstation startup flow on tablet** — startup checks screen exists in `apps/tablet/src/app/(app)/startup/page.tsx`, shows health per component. Still headless on workstation side.
 
-5. **Tablet-specific analytics** - the analytics page exists in the admin portal but is not filtered per workstation. A tablet should only see data for its paired workstation.
+5. **Tablet-specific analytics** — analytics page in tablet app shows session data from WebSocket. Per-workstation filtering on central API done (`GET /api/detections?workstationId=X`).
 
-6. **Hit list management from tablet** - hit list assignment and creation is admin-portal-only. The tablet needs to assign hit lists to its paired workstation.
+6. **Hit list management from tablet** — ✅ **DONE** — tablet `/hitlists` screen shows all hitlists, allows assign/unassign per workstation.
 
-7. **Connected devices view** - the workstation's TabletBridge tracks WebSocket connections but does not expose a list of connected tablets.
+7. **Connected devices view** — tablet count broadcast via `{ type: "status", data: { connectedTablets: N } }` from workstation. Admin portal devices page not yet updated.
 
 ---
 
 ## Execution Plan
 
-### Phase 1: Store All Scans
+### Phase 1: Store All Scans ✅ COMPLETED
 
 **Goal**: Every plate the workstation OCRs gets stored locally and synced to central server, regardless of hit list match.
 
@@ -164,7 +164,7 @@ Every vehicle scanned is stored in the central server, not just hit list matches
 
 ---
 
-### Phase 2: Hit List Assignment Per Workstation
+### Phase 2: Hit List Assignment Per Workstation ✅ COMPLETED
 
 **Goal**: Assign specific hit lists to specific workstations. A workstation only downloads and matches against its assigned hit lists.
 
@@ -221,7 +221,7 @@ hitlistAssignments HitlistAssignment[]
 
 ---
 
-### Phase 3: Tablet PWA
+### Phase 3: Tablet PWA ✅ COMPLETED
 
 **Goal**: Build `apps/tablet` as a Progressive Web App that connects to a specific workstation and gives the operator a dashboard, alert feed, hit list controls, and analytics for that workstation.
 
@@ -400,14 +400,14 @@ hitlistAssignments HitlistAssignment[]
 apps/
   api/                    # central server (Hono + PostgreSQL)
   web/                    # admin portal (Next.js)
-  tablet/                 # tablet PWA (Next.js)         ← NEW
+  tablet/                 # tablet PWA (Next.js) ✅ created in Phase 3
   workstation-agent/      # field runtime (Node.js)
   ws-server/              # legacy WebSocket relay (optional, preserved)
 ```
 
 ## Build Order
 
-Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5 → Phase 6.
+Phase 1 ✅ → Phase 2 ✅ → Phase 3 ✅ → Phase 4 → Phase 5 → Phase 6.
 
 No phase can be skipped. Each depends on the previous:
 - Phase 3 (tablet) needs Phase 1 (all scans stored) and Phase 2 (hitlist assignment) to show real data.
