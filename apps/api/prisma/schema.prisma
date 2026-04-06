@@ -380,3 +380,11 @@ model AuditLog {
   @@index([createdAt])
   @@map("audit_logs")
 }
+
+model RateLimitEntry {
+  key     String   @id
+  count   Int      @default(0)
+  resetAt DateTime
+
+  @@map("rate_limit_entries")
+}
