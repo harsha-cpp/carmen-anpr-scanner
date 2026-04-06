@@ -27,7 +27,7 @@ interface CameraAdapter {
   start(): Promise<void>;
   stop(): Promise<void>;
   grabFrame(): Promise<CameraFrame>;
-  healthCheck(): Promise<{ ok: boolean; message: string }>;
+  healthCheck(): Promise<ComponentHealth>;
 }
 
 interface CameraAdapterModule {
@@ -218,7 +218,7 @@ async function updateRuntimeHealthSnapshots(db: DbClient, camera: CameraAdapter,
     const cameraHealth = await camera.healthCheck();
     db.upsertHealthSnapshot({
       component: "camera",
-      status: toComponentStatus(cameraHealth.ok),
+      status: cameraHealth.status,
       message: cameraHealth.message,
       lastCheckedAt: now,
     });
