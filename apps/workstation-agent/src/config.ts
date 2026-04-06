@@ -44,6 +44,11 @@ function bool(key: string, fallback: boolean): boolean {
   return raw === "true" || raw === "1";
 }
 
+function float(key: string, fallback: number): number {
+  const raw = process.env[key];
+  return raw ? parseFloat(raw) : fallback;
+}
+
 export function loadConfig(): WorkstationConfig {
   return Object.freeze({
     centralApiUrl: required("CENTRAL_API_URL"),
@@ -69,6 +74,9 @@ export function loadConfig(): WorkstationConfig {
     tabletWsPort: int("TABLET_WS_PORT", 8089),
     ttsEnabled: bool("TTS_ENABLED", true),
     fuzzyMatchEnabled: bool("FUZZY_MATCH_ENABLED", false),
+    ocrPreprocess: bool("OCR_PREPROCESS", true),
+    ocrMinConfidence: float("OCR_MIN_CONFIDENCE", 0.55),
+    ocrWorkerCount: int("OCR_WORKER_COUNT", 2),
     logLevel: optional("LOG_LEVEL", "info"),
   });
 }

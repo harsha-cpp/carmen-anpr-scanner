@@ -300,5 +300,8 @@ export interface WorkstationConfig {
   tabletWsPort: number;
   ttsEnabled: boolean;
   fuzzyMatchEnabled: boolean;
+  ocrPreprocess: boolean;
+  ocrMinConfidence: number;
+  ocrWorkerCount: number;
   logLevel: string;
 }
