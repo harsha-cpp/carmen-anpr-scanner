@@ -64,6 +64,12 @@ export class CentralApiClient {
     });
   }
 
+  public async getAssignedHitlists(): Promise<{ hitlists: Array<{ hitlistId: string; name: string; status: string; currentVersionNumber: number }> }> {
+    return this.request<{ hitlists: Array<{ hitlistId: string; name: string; status: string; currentVersionNumber: number }> }>("/api/sync/hitlists", {
+      auth: "device",
+    });
+  }
+
   public async getSyncCursors(): Promise<SyncCursor[]> {
     return this.request<SyncCursor[]>("/api/sync/cursors", { auth: "device" });
   }

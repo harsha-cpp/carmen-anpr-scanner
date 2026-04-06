@@ -104,6 +104,88 @@ function buildVehicleDescription(entry: LocalHitlistEntry): string | null {
   return parts.length > 0 ? parts.join(" ") : null;
 }
 
+interface DetectionArtifacts {
+  pendingDetection: PendingDetection;
+  detectionEvent: DetectionEvent;
+  pendingMatchEvents: PendingMatchEvent[];
+  alerts: AlertPayload[];
+}
+
+export function buildDetectionArtifacts(params: {
+  plate: string;
+  normalizedPlate: string;
+  occurredAt: string;
+  confidence: number | null;
+  snapshotPath: string | null;
+  match: MatchResult;
+}): DetectionArtifacts {
+  const detectionId = randomUUID();
+  const externalEventId = randomUUID();
+  const primaryEntry = params.match.matched ? params.match.entries[0] : undefined;
+
+  const pendingDetection: PendingDetection = {
+    id: detectionId,
+    externalEventId,
+    plate: params.plate,
+    plateNormalized: params.normalizedPlate,
+    occurredAt: params.occurredAt,
+    confidence: params.confidence,
+    snapshotPath: params.snapshotPath,
+    hitlistId: primaryEntry?.hitlistId ?? null,
+    country: primaryEntry?.countryOrRegion ?? null,
+    make: primaryEntry?.vehicleMake ?? null,
+    model: primaryEntry?.vehicleModel ?? null,
+    color: primaryEntry?.vehicleColor ?? null,
+    synced: 0,
+    syncedAt: null,
+    createdAt: params.occurredAt,
+  };
+
+  const detectionEvent: DetectionEvent = {
+    id: pendingDetection.id,
+    externalEventId: pendingDetection.externalEventId,
+    plate: pendingDetection.plate,
+    plateNormalized: pendingDetection.plateNormalized,
+    occurredAt: pendingDetection.occurredAt,
+    confidence: pendingDetection.confidence,
+    snapshotPath: pendingDetection.snapshotPath,
+  };
+
+  const pendingMatchEvents = params.match.matched
+    ? params.match.entries.map((entry) => ({
+      id: randomUUID(),
+      externalEventId: randomUUID(),
+      detectionId: null,
+      hitlistEntryId: entry.id,
+      alertStatus: "PENDING" as const,
+      note: entry.reasonSummary,
+      synced: 0,
+      syncedAt: null,
+      createdAt: params.occurredAt,
+    }))
+    : [];
+
+  const alerts = params.match.matched
+    ? params.match.entries.map((entry) => ({
+      plate: params.plate,
+      normalizedPlate: params.normalizedPlate,
+      priority: entry.priority,
+      hitlistEntryId: entry.id,
+      reasonSummary: entry.reasonSummary,
+      vehicleDescription: buildVehicleDescription(entry),
+      detectionId,
+      occurredAt: params.occurredAt,
+    }))
+    : [];
+
+  return {
+    pendingDetection,
+    detectionEvent,
+    pendingMatchEvents,
+    alerts,
+  };
+}
+
 async function ensureRuntimeDirectories(config: WorkstationConfig): Promise<void> {
   await mkdir(dirname(config.dbPath), { recursive: true });
   await mkdir(config.snapshotDir, { recursive: true });
@@ -240,7 +322,6 @@ class Alerter {
     match: MatchResult,
     alerts: AlertPayload[],
   ): Promise<void> {
-    this.tabletBridge.broadcast({ type: "detection", data: detection });
     this.tabletBridge.broadcast({
       type: "match",
       data: {
@@ -256,6 +337,18 @@ class Alerter {
   }
 }
 
+async function fetchAssignedHitlistIds(api: CentralApiClient): Promise<string[]> {
+  try {
+    const resp = await api.getAssignedHitlists();
+    return resp.hitlists.map(h => h.hitlistId);
+  } catch (error) {
+    logger.warn("failed to fetch assigned hitlists, using empty list", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
+}
+
 export async function main(): Promise<void> {
   const config = loadConfig();
   setLogLevel(isLogLevel(config.logLevel) ? config.logLevel : "info");
@@ -267,7 +360,6 @@ export async function main(): Promise<void> {
   await bootstrapDeviceToken(api, config);
 
   const runtimeModules = await loadRuntimeModules();
-  const hitlistId = process.env.HITLIST_ID?.trim() ?? null;
   const hitlistDownloader = new HitlistDownloader(api, db);
   const plateMatcher = new PlateMatcher(db, config.fuzzyMatchEnabled);
   const outboxFlusher = new OutboxFlusher(api, db, config);
@@ -348,7 +440,7 @@ export async function main(): Promise<void> {
     await ocr.initialize();
     await camera.start();
     await updateRuntimeHealthSnapshots(db, camera, ocr);
-    await hitlistDownloader.syncAll(hitlistId ? [hitlistId] : []);
+    await hitlistDownloader.syncAll(await fetchAssignedHitlistIds(api));
 
     await runSerialized("heartbeat", "heartbeat", async () => {
       await heartbeatService.sendHeartbeat();
@@ -358,7 +450,7 @@ export async function main(): Promise<void> {
     timerHandles.push(
       setInterval(() => {
         void runSerialized("hitlist", "hitlist sync", async () => {
-          await hitlistDownloader.syncAll(hitlistId ? [hitlistId] : []);
+          await hitlistDownloader.syncAll(await fetchAssignedHitlistIds(api));
         });
       }, config.hitlistSyncIntervalMs),
     );
@@ -376,7 +468,7 @@ export async function main(): Promise<void> {
     timerHandles.push(
       setInterval(() => {
         void runSerialized("outbox", "outbox flush", async () => {
-          await outboxFlusher.flush(config.outboxBatchSize);
+          await outboxFlusher.flush(config.outboxBatchSize, config.detectionBatchSize);
         });
       }, config.outboxFlushIntervalMs),
     );
@@ -409,77 +501,37 @@ export async function main(): Promise<void> {
           }
 
           const match = plateMatcher.match(plate);
-          if (!match.matched) {
-            continue;
-          }
-
           const now = frame.timestamp.toISOString();
-          const primaryEntry = match.entries[0];
-          const detectionId = randomUUID();
-          const snapshotResult = await runtimeModules.saveSnapshot(frame.data, config).catch((err: unknown) => {
-            logger.warn("snapshot capture failed", { detectionId, error: toErrorMessage(err) });
-            return null;
-          });
-          const snapshotPath = extractSnapshotPath(snapshotResult);
-
-          const pendingDetection: PendingDetection = {
-            id: detectionId,
-            externalEventId: randomUUID(),
-            plate,
-            plateNormalized: normalizedPlate,
-            occurredAt: now,
-            confidence: result.confidence,
-            snapshotPath,
-            hitlistId: primaryEntry?.hitlistId ?? null,
-            country: primaryEntry?.countryOrRegion ?? null,
-            make: primaryEntry?.vehicleMake ?? null,
-            model: primaryEntry?.vehicleModel ?? null,
-            color: primaryEntry?.vehicleColor ?? null,
-            synced: 0,
-            syncedAt: null,
-            createdAt: now,
-          };
-
-          db.insertDetection(pendingDetection);
-
-          const detectionEvent: DetectionEvent = {
-            id: pendingDetection.id,
-            externalEventId: pendingDetection.externalEventId,
-            plate: pendingDetection.plate,
-            plateNormalized: pendingDetection.plateNormalized,
-            occurredAt: pendingDetection.occurredAt,
-            confidence: pendingDetection.confidence,
-            snapshotPath: pendingDetection.snapshotPath,
-          };
-
-          const alerts: AlertPayload[] = [];
-          for (const entry of match.entries) {
-            const pendingMatchEvent: PendingMatchEvent = {
-              id: randomUUID(),
-              externalEventId: randomUUID(),
-              detectionId: null,
-              hitlistEntryId: entry.id,
-              alertStatus: "PENDING",
-              note: entry.reasonSummary,
-              synced: 0,
-              syncedAt: null,
-              createdAt: now,
-            };
-
-            db.insertMatchEvent(pendingMatchEvent);
-            alerts.push({
-              plate,
-              normalizedPlate,
-              priority: entry.priority,
-              hitlistEntryId: entry.id,
-              reasonSummary: entry.reasonSummary,
-              vehicleDescription: buildVehicleDescription(entry),
-              detectionId,
-              occurredAt: now,
+          let snapshotPath: string | null = null;
+          if (match.matched) {
+            const snapshotResult = await runtimeModules.saveSnapshot(frame.data, config).catch((err: unknown) => {
+              logger.warn("snapshot capture failed", { plate: normalizedPlate, error: toErrorMessage(err) });
+              return null;
             });
+            snapshotPath = extractSnapshotPath(snapshotResult);
           }
 
-          await alerter.handleMatch(detectionEvent, match, alerts);
+           const artifacts = buildDetectionArtifacts({
+             plate,
+             normalizedPlate,
+             occurredAt: now,
+             confidence: result.confidence,
+             snapshotPath,
+             match,
+           });
+
+           db.insertDetection(artifacts.pendingDetection);
+
+           for (const pendingMatchEvent of artifacts.pendingMatchEvents) {
+             db.insertMatchEvent(pendingMatchEvent);
+           }
+
+           // Broadcast ALL detections to tablets
+           tabletBridge.broadcast({ type: "detection", data: artifacts.detectionEvent });
+
+           if (match.matched) {
+             await alerter.handleMatch(artifacts.detectionEvent, match, artifacts.alerts);
+           }
         }
       } catch (error) {
         logger.error("frame processing failed", { error: toErrorMessage(error) });
