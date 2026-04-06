@@ -26,18 +26,42 @@ function getSessionCookie(req: NextRequest): string | undefined {
   return undefined;
 }
 
+const roleCache = new Map<string, { role: string | null; expiresAt: number }>();
+const ROLE_CACHE_TTL_MS = 30_000;
+
 async function fetchRole(cookie: string): Promise<string | null> {
+  const cached = roleCache.get(cookie);
+  if (cached && cached.expiresAt > Date.now()) return cached.role;
+
+  let role: string | null;
   try {
     const res = await fetch(`${API_BASE}/api/session`, {
       headers: { Cookie: cookie },
       signal: AbortSignal.timeout(3000),
     });
-    if (!res.ok) return null;
-    const json = await res.json();
-    return json?.data?.user?.role ?? null;
+    if (!res.ok) {
+      role = null;
+    } else {
+      const json = await res.json();
+      role = json?.data?.user?.role ?? null;
+    }
   } catch {
-    return null;
+    role = null;
   }
+
+  roleCache.set(cookie, { role, expiresAt: Date.now() + ROLE_CACHE_TTL_MS });
+
+  // Evict expired entries when cache is too large
+  if (roleCache.size > 500) {
+    const now = Date.now();
+    for (const [key, value] of roleCache) {
+      if (value.expiresAt <= now) {
+        roleCache.delete(key);
+      }
+    }
+  }
+
+  return role;
 }
 
 export async function proxy(req: NextRequest) {
