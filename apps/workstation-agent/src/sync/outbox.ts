@@ -66,7 +66,7 @@ export class OutboxFlusher {
     this.maxDelayMs = config?.outboxRetryMaxDelayMs ?? 300000;
   }
 
-  public async flush(batchSize: number): Promise<FlushSummary> {
+  public async flush(matchEventBatchSize: number, detectionBatchSize: number = matchEventBatchSize): Promise<FlushSummary> {
     const summary: FlushSummary = {
       matchEventsSynced: 0,
       detectionsSynced: 0,
@@ -79,12 +79,12 @@ export class OutboxFlusher {
 
     const now = new Date().toISOString();
 
-    const matchEvents = this.db.getRetryableMatchEvents(batchSize, now);
+    const matchEvents = this.db.getRetryableMatchEvents(matchEventBatchSize, now);
     for (const matchEvent of matchEvents) {
       await this.syncMatchEvent(matchEvent, summary);
     }
 
-    const detections = this.db.getRetryableDetections(batchSize, now);
+    const detections = this.db.getRetryableDetections(detectionBatchSize, now);
     for (const detection of detections) {
       await this.syncDetection(detection, summary);
     }

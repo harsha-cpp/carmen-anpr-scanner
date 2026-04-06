@@ -68,6 +68,7 @@ export function loadConfig(): WorkstationConfig {
     heartbeatIntervalMs: int("HEARTBEAT_INTERVAL_MS", 30000),
     outboxFlushIntervalMs: int("OUTBOX_FLUSH_INTERVAL_MS", 15000),
     outboxBatchSize: int("OUTBOX_BATCH_SIZE", 20),
+    detectionBatchSize: int("DETECTION_BATCH_SIZE", int("OUTBOX_BATCH_SIZE", 20)),
     outboxMaxRetries: int("OUTBOX_MAX_RETRIES", 10),
     outboxRetryBaseDelayMs: int("OUTBOX_RETRY_BASE_DELAY_MS", 5000),
     outboxRetryMaxDelayMs: int("OUTBOX_RETRY_MAX_DELAY_MS", 300000),
