@@ -303,6 +303,8 @@ model MatchEvent {
   hitlistEntry    HitlistEntry?  @relation(fields: [hitlistEntryId], references: [id], onDelete: SetNull)
   evidenceSnapshots EvidenceSnapshot[]
 
+  @@index([workstationId, createdAt])
+  @@index([createdAt])
   @@map("match_events")
 }
 
