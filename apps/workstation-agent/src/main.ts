@@ -7,6 +7,7 @@ import { loadConfig } from "./config.js";
 import { DbClient } from "./db/client.js";
 import { HeartbeatService } from "./health/heartbeat.js";
 import { PlateMatcher } from "./detection/matcher.js";
+import { HitlistDownloader } from "./hitlist/downloader.js";
 import { createLogger, setLogLevel } from "./logger.js";
 import { OutboxFlusher } from "./sync/outbox.js";
 import { TabletBridge } from "./tablet/bridge.js";
@@ -250,70 +251,7 @@ async function updateRuntimeHealthSnapshots(db: DbClient, camera: CameraAdapter,
   }
 }
 
-class HitlistDownloader {
-  private readonly logger = createLogger("hitlist-downloader");
 
-  public constructor(
-    private readonly api: CentralApiClient,
-    private readonly db: DbClient,
-    private readonly hitlistId: string | null,
-  ) {}
-
-  public async sync(): Promise<number> {
-    if (!this.hitlistId) {
-      this.logger.warn("hitlist sync skipped; HITLIST_ID not configured");
-      return 0;
-    }
-
-    const cursor = this.db.getSyncCursor("HITLIST");
-    const sinceVersion = cursor ? Number.parseInt(cursor.cursor, 10) : undefined;
-    const response = await this.api.getHitlist(
-      this.hitlistId,
-      typeof sinceVersion === "number" && Number.isFinite(sinceVersion) ? sinceVersion : undefined,
-    );
-
-    if (!response.changed || !response.version) {
-      this.db.setSyncCursor("HITLIST", String(response.currentVersionNumber));
-      this.logger.debug("hitlist already current", {
-        hitlistId: this.hitlistId,
-        version: response.currentVersionNumber,
-      });
-      return 0;
-    }
-
-    this.db.clearHitlistEntries(this.hitlistId);
-    const syncedAt = new Date().toISOString();
-
-    for (const entry of response.version.entries) {
-      this.db.upsertHitlistEntry({
-        id: entry.id,
-        hitlistId: response.hitlistId,
-        plateOriginal: entry.plateOriginal,
-        plateNormalized: entry.plateNormalized,
-        countryOrRegion: entry.countryOrRegion,
-        priority: entry.priority,
-        status: entry.status,
-        validFrom: entry.validFrom,
-        validUntil: entry.validUntil,
-        reasonSummary: entry.reasonSummary,
-        vehicleMake: entry.vehicleMake,
-        vehicleModel: entry.vehicleModel,
-        vehicleColor: entry.vehicleColor,
-        metadata: entry.tags ? JSON.stringify(entry.tags) : null,
-        syncedAt,
-      });
-    }
-
-    this.db.setSyncCursor("HITLIST", String(response.currentVersionNumber), syncedAt);
-    this.logger.info("hitlist synced", {
-      hitlistId: this.hitlistId,
-      version: response.currentVersionNumber,
-      entries: response.version.entries.length,
-    });
-
-    return response.version.entries.length;
-  }
-}
 
 
 class TtsAnnouncer {
@@ -368,7 +306,8 @@ export async function main(): Promise<void> {
   await bootstrapDeviceToken(api, config);
 
   const runtimeModules = await loadRuntimeModules();
-  const hitlistDownloader = new HitlistDownloader(api, db, process.env.HITLIST_ID?.trim() || null);
+  const hitlistId = process.env.HITLIST_ID?.trim() ?? null;
+  const hitlistDownloader = new HitlistDownloader(api, db);
   const plateMatcher = new PlateMatcher(db);
   const outboxFlusher = new OutboxFlusher(api, db, config);
   const heartbeatService = new HeartbeatService(api, db, config);
@@ -448,7 +387,7 @@ export async function main(): Promise<void> {
     await ocr.initialize();
     await camera.start();
     await updateRuntimeHealthSnapshots(db, camera, ocr);
-    await hitlistDownloader.sync();
+    await hitlistDownloader.syncAll(hitlistId ? [hitlistId] : []);
 
     await runSerialized("heartbeat", "heartbeat", async () => {
       await heartbeatService.sendHeartbeat();
@@ -458,7 +397,7 @@ export async function main(): Promise<void> {
     timerHandles.push(
       setInterval(() => {
         void runSerialized("hitlist", "hitlist sync", async () => {
-          await hitlistDownloader.sync();
+          await hitlistDownloader.syncAll(hitlistId ? [hitlistId] : []);
         });
       }, config.hitlistSyncIntervalMs),
     );
