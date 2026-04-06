@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import { plateHash, encryptPlate, decryptPlate, normalizePlate } from "./crypto";
 import { tableRef } from "./db";
+import { isInMainHitlist } from "./hitlistClient";
 
 interface DummyEntry {
   plate: string;
@@ -104,6 +105,10 @@ export async function isPlateBlacklisted(
   const normalized = normalizePlate(plate);
   if (!normalized) {
     return { isBlacklisted: false, normalizedPlate: normalized, record: null };
+  }
+
+  if (isInMainHitlist(normalized)) {
+    return { isBlacklisted: true, normalizedPlate: normalized, record: null };
   }
 
   const { rows } = await db.query(

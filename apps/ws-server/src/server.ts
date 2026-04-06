@@ -22,6 +22,7 @@ import {
   getRecentDetections,
 } from "./lib/detectionService";
 import type { Detection } from "./lib/detectionService";
+import { refreshHitlistCache } from "./lib/hitlistClient";
 
 const logger = pino({ name: "ws-server", level: process.env.LOG_LEVEL ?? "info" });
 
@@ -71,7 +72,9 @@ function scheduleDbRetry(): void {
   logger.info({ retryMs: DB_RETRY_MS }, "retrying DB initialization");
   dbRetryTimer = setTimeout(() => {
     dbRetryTimer = null;
-    void initDb().catch(() => {});
+void initDb().catch(() => {});
+void refreshHitlistCache().catch(() => {});
+setInterval(() => { refreshHitlistCache().catch(() => {}); }, 60_000);
   }, DB_RETRY_MS);
 }
 
