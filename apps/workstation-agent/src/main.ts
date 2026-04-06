@@ -6,6 +6,7 @@ import { CentralApiClient } from "./api/client.js";
 import { loadConfig } from "./config.js";
 import { DbClient } from "./db/client.js";
 import { HeartbeatService } from "./health/heartbeat.js";
+import { PlateMatcher } from "./detection/matcher.js";
 import { createLogger, setLogLevel } from "./logger.js";
 import { OutboxFlusher } from "./sync/outbox.js";
 import { TabletBridge } from "./tablet/bridge.js";
@@ -314,20 +315,6 @@ class HitlistDownloader {
   }
 }
 
-class PlateMatcher {
-  public constructor(private readonly db: DbClient) {}
-
-  public match(plate: string): MatchResult {
-    const normalizedPlate = normalizePlate(plate);
-    const entries = normalizedPlate ? this.db.findMatchingEntries(normalizedPlate) : [];
-
-    return {
-      matched: entries.length > 0,
-      entries,
-      normalizedPlate,
-    };
-  }
-}
 
 class TtsAnnouncer {
   private readonly logger = createLogger("tts-announcer");
