@@ -3,6 +3,7 @@ node_modules/
 
 # next.js
 apps/web/.next/
+apps/tablet/.next/
 
 # turbo
 .turbo/
