@@ -68,11 +68,8 @@ export class HitlistDownloader {
         }
 
         const syncedAt = new Date().toISOString();
-        const removed = this.db.clearHitlistEntries(hitlistId);
-
-        for (const entry of response.version.entries) {
-          this.db.upsertHitlistEntry(this.toLocalHitlistEntry(hitlistId, entry, syncedAt));
-        }
+        const entries = response.version.entries.map(e => this.toLocalHitlistEntry(hitlistId, e, syncedAt));
+        const inserted = this.db.replaceHitlistEntries(hitlistId, entries, syncedAt);
 
         cursorState[hitlistId] = response.currentVersionNumber;
         this.persistCursorState(cursorState);
@@ -82,8 +79,7 @@ export class HitlistDownloader {
           hitlistId,
           sinceVersion,
           currentVersionNumber: response.currentVersionNumber,
-          removed,
-          inserted: response.version.entries.length,
+          inserted,
         });
       } catch (error) {
         summary.errors += 1;

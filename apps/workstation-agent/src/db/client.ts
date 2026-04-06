@@ -358,6 +358,69 @@ export class DbClient {
     return result.changes;
   }
 
+  public replaceHitlistEntries(hitlistId: string, entries: LocalHitlistEntry[], syncedAt: string): number {
+    const clear = this.db.prepare("DELETE FROM local_hitlist_entries WHERE hitlistId = ?");
+    const upsert = this.db.prepare(`
+      INSERT INTO local_hitlist_entries (
+        id,
+        hitlistId,
+        plateOriginal,
+        plateNormalized,
+        countryOrRegion,
+        priority,
+        status,
+        validFrom,
+        validUntil,
+        reasonSummary,
+        vehicleMake,
+        vehicleModel,
+        vehicleColor,
+        metadata,
+        syncedAt
+      ) VALUES (
+        @id,
+        @hitlistId,
+        @plateOriginal,
+        @plateNormalized,
+        @countryOrRegion,
+        @priority,
+        @status,
+        @validFrom,
+        @validUntil,
+        @reasonSummary,
+        @vehicleMake,
+        @vehicleModel,
+        @vehicleColor,
+        @metadata,
+        @syncedAt
+      )
+      ON CONFLICT(id) DO UPDATE SET
+        plateOriginal = excluded.plateOriginal,
+        plateNormalized = excluded.plateNormalized,
+        countryOrRegion = excluded.countryOrRegion,
+        priority = excluded.priority,
+        status = excluded.status,
+        validFrom = excluded.validFrom,
+        validUntil = excluded.validUntil,
+        reasonSummary = excluded.reasonSummary,
+        vehicleMake = excluded.vehicleMake,
+        vehicleModel = excluded.vehicleModel,
+        vehicleColor = excluded.vehicleColor,
+        metadata = excluded.metadata,
+        syncedAt = excluded.syncedAt
+    `);
+
+    const transaction = this.db.transaction((id: string, rows: LocalHitlistEntry[]) => {
+      clear.run(id);
+      for (const row of rows) {
+        upsert.run({ ...row, syncedAt });
+      }
+      return rows.length;
+    });
+
+    return transaction(hitlistId, entries) as number;
+  }
+
   public insertSnapshot(snapshot: PendingSnapshot): void {
     this.db
       .prepare(
