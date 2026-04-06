@@ -70,6 +70,12 @@ function parsePositiveInteger(value: string | undefined, fallback: number) {
   return parsed;
 }
 
+function parseNonNegativeInteger(value: string): number | null {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) return null;
+  return parsed;
+}
+
 function parseIsoDate(value: string | undefined) {
   if (!value) {
     return null;
@@ -89,6 +95,8 @@ matchEventRoutes.get("/api/match-events", async (c) => {
   const workstationId = c.req.query("workstationId")?.trim();
   const page = parsePositiveInteger(c.req.query("page"), 1);
   const requestedLimit = parsePositiveInteger(c.req.query("limit"), 50);
+  const offsetParam = c.req.query("offset");
+  const offset = offsetParam !== undefined ? parseNonNegativeInteger(offsetParam) : null;
   const from = parseIsoDate(c.req.query("from"));
   const to = parseIsoDate(c.req.query("to"));
 
@@ -104,6 +112,10 @@ matchEventRoutes.get("/api/match-events", async (c) => {
     return fail(c, 400, "limit must be a positive integer.");
   }
 
+  if (offsetParam !== undefined && offset === null) {
+    return fail(c, 400, "offset must be a non-negative integer.");
+  }
+
   if (from === undefined || to === undefined) {
     return fail(c, 400, "from and to must be valid ISO date strings.");
   }
@@ -113,7 +125,8 @@ matchEventRoutes.get("/api/match-events", async (c) => {
   }
 
   const status = statusParam && isMatchStatus(statusParam) ? statusParam : undefined;
-  const limit = Math.min(requestedLimit, 100);
+  const limit = Math.min(requestedLimit, 200);
+  const skip = offset ?? (page - 1) * limit;
   const where = {
     alertStatus: status,
     workstationId: workstationId || undefined,
@@ -130,7 +143,7 @@ matchEventRoutes.get("/api/match-events", async (c) => {
       where,
       include: matchEventInclude,
       orderBy: { createdAt: "desc" },
-      skip: (page - 1) * limit,
+      skip,
       take: limit,
     }),
     prisma.matchEvent.count({ where }),
