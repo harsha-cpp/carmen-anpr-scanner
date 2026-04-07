@@ -1,5 +1,5 @@
 -- CreateIndex
-CREATE INDEX IF NOT EXISTS "match_events_workstation_id_created_at_idx" ON "match_events"("workstation_id", "created_at");
+CREATE INDEX IF NOT EXISTS "match_events_workstationId_createdAt_idx" ON "match_events"("workstationId", "createdAt");
 
 -- CreateIndex
-CREATE INDEX IF NOT EXISTS "match_events_created_at_idx" ON "match_events"("created_at");
+CREATE INDEX IF NOT EXISTS "match_events_createdAt_idx" ON "match_events"("createdAt");

@@ -27,7 +27,36 @@ deviceRoutes.post("/api/devices/register", async (c) => {
   if (deviceType === "WORKSTATION") {
     const existing = await prisma.workstation.findUnique({ where: { deviceId } });
     if (existing) {
-      return fail(c, 409, "Workstation already registered.");
+      const issued = issueDeviceToken();
+      await prisma.deviceToken.updateMany({
+        where: { workstationId: existing.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      await prisma.deviceToken.create({
+        data: {
+          tokenHash: issued.tokenHash,
+          label: "re-bootstrap",
+          deviceType: "WORKSTATION",
+          workstationId: existing.id,
+        },
+      });
+      await prisma.workstation.update({
+        where: { id: existing.id },
+        data: { status: "ACTIVE", lastSeenAt: new Date() },
+      });
+
+      await writeAuditLog({
+        action: "device.re-registered",
+        entityType: "workstation",
+        entityId: existing.id,
+        metadata: { deviceId, deviceType },
+      });
+
+      return ok(c, {
+        deviceType,
+        device: existing,
+        deviceToken: issued.rawToken,
+      }, 200);
     }
 
     const issued = issueDeviceToken();
@@ -64,7 +93,36 @@ deviceRoutes.post("/api/devices/register", async (c) => {
 
   const existing = await prisma.tablet.findUnique({ where: { deviceId } });
   if (existing) {
-    return fail(c, 409, "Tablet already registered.");
+    const issued = issueDeviceToken();
+    await prisma.deviceToken.updateMany({
+      where: { tabletId: existing.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    await prisma.deviceToken.create({
+      data: {
+        tokenHash: issued.tokenHash,
+        label: "re-bootstrap",
+        deviceType: "TABLET",
+        tabletId: existing.id,
+      },
+    });
+    await prisma.tablet.update({
+      where: { id: existing.id },
+      data: { status: "ACTIVE", lastSeenAt: new Date() },
+    });
+
+    await writeAuditLog({
+      action: "device.re-registered",
+      entityType: "tablet",
+      entityId: existing.id,
+      metadata: { deviceId, deviceType },
+    });
+
+    return ok(c, {
+      deviceType,
+      device: existing,
+      deviceToken: issued.rawToken,
+    }, 200);
   }
 
   const issued = issueDeviceToken();

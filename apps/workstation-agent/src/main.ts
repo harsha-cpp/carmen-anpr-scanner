@@ -209,12 +209,19 @@ async function loadRuntimeModules(): Promise<{
   };
 }
 
-async function bootstrapDeviceToken(api: CentralApiClient, config: WorkstationConfig): Promise<string> {
-  const existingToken = process.env.DEVICE_TOKEN?.trim();
-  if (existingToken) {
-    api.setDeviceToken(existingToken);
+async function bootstrapDeviceToken(api: CentralApiClient, config: WorkstationConfig, db: DbClient): Promise<string> {
+  const envToken = process.env.DEVICE_TOKEN?.trim();
+  if (envToken) {
+    api.setDeviceToken(envToken);
     logger.info("using device token from environment", { deviceId: config.deviceId });
-    return existingToken;
+    return envToken;
+  }
+
+  const storedToken = db.getDeviceToken();
+  if (storedToken) {
+    api.setDeviceToken(storedToken);
+    logger.info("using persisted device token", { deviceId: config.deviceId });
+    return storedToken;
   }
 
   if (!process.env.DEVICE_PROVISIONING_TOKEN && config.deviceProvisioningToken) {
@@ -233,7 +240,8 @@ async function bootstrapDeviceToken(api: CentralApiClient, config: WorkstationCo
   });
 
   api.setDeviceToken(registration.deviceToken);
-  logger.info("device registered", {
+  db.setDeviceToken(registration.deviceToken);
+  logger.info("device registered and token persisted", {
     deviceId: registration.device.deviceId,
     status: registration.device.status,
   });
@@ -357,7 +365,7 @@ export async function main(): Promise<void> {
 
   const db = new DbClient(config.dbPath);
   const api = new CentralApiClient({ baseUrl: config.centralApiUrl });
-  await bootstrapDeviceToken(api, config);
+  await bootstrapDeviceToken(api, config, db);
 
   const runtimeModules = await loadRuntimeModules();
   const hitlistDownloader = new HitlistDownloader(api, db);

@@ -641,6 +641,23 @@ export class DbClient {
       .run({ scope, cursor, updatedAt });
   }
 
+  public getDeviceToken(): string | null {
+    const row = this.db
+      .prepare(`SELECT cursor FROM sync_state WHERE scope = 'DEVICE_TOKEN'`)
+      .get() as { cursor: string } | undefined;
+    return row?.cursor ?? null;
+  }
+
+  public setDeviceToken(token: string): void {
+    const updatedAt = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO sync_state (scope, cursor, updatedAt) VALUES ('DEVICE_TOKEN', @token, @updatedAt)
+         ON CONFLICT(scope) DO UPDATE SET cursor = excluded.cursor, updatedAt = excluded.updatedAt`,
+      )
+      .run({ token, updatedAt });
+  }
+
   private resolvePendingTable(table: "pending_detections" | "pending_match_events"): string {
     if (table === "pending_detections") {
       return table;
