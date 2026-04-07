@@ -184,8 +184,8 @@ export default function CamerasPage() {
     else setRefreshing(true);
     setError(null);
     try {
-      const resp = await api.get<ApiResp<{ workstations: Workstation[] }>>("/api/workstations");
-      if (resp.success) setWorkstations(resp.data.workstations);
+      const resp = await api.get<ApiResp<Workstation[]>>("/api/workstations");
+      if (resp.success) setWorkstations(resp.data ?? []);
       else setError(resp.error);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load workstations");
