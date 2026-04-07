@@ -7,6 +7,7 @@ import {
   Bell,
   LayoutDashboard,
   ListChecks,
+  ScanLine,
   Settings,
   Shield,
   Wifi,
@@ -24,6 +25,7 @@ type TabItem = {
 
 const TABS: TabItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
+  { label: "Scans", icon: ScanLine, href: "/scans" },
   { label: "Alerts", icon: Bell, href: "/alerts" },
   { label: "Hit Lists", icon: ListChecks, href: "/hitlists" },
   { label: "Analytics", icon: BarChart3, href: "/analytics" },
