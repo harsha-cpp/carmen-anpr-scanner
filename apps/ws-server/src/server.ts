@@ -72,9 +72,12 @@ function scheduleDbRetry(): void {
   logger.info({ retryMs: DB_RETRY_MS }, "retrying DB initialization");
   dbRetryTimer = setTimeout(() => {
     dbRetryTimer = null;
-void initDb().catch(() => {});
-void refreshHitlistCache().catch(() => {});
-setInterval(() => { refreshHitlistCache().catch(() => {}); }, 60_000);
+void initDb()
+  .then(() => {
+    void refreshHitlistCache().catch(() => {});
+    setInterval(() => { refreshHitlistCache().catch(() => {}); }, 60_000);
+  })
+  .catch(() => {});
   }, DB_RETRY_MS);
 }
 

@@ -92,9 +92,13 @@ async function ensureSchema() {
       AND column_name = 'detected_at'
   `);
   if (rows.length === 0) {
-    await pool.query(
-      `ALTER TABLE ${tableRef(DETECTIONS_COLLECTION)} ADD COLUMN detected_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
-    );
+    try {
+      await pool.query(
+        `ALTER TABLE ${tableRef(DETECTIONS_COLLECTION)} ADD COLUMN IF NOT EXISTS detected_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+      );
+    } catch {
+      // concurrent startup may have added the column between our check and alter
+    }
   }
 
   await pool.query(`
