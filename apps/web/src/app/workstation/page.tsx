@@ -4,20 +4,17 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Radar } from "lucide-react";
 
-import { auth } from "@/lib/auth-client";
-
 export default function WorkstationRoot() {
   const router = useRouter();
-  const { data: session, isPending } = auth.useSession();
 
   useEffect(() => {
-    if (isPending) return;
-    if (session) {
+    const raw = localStorage.getItem("workstation_session");
+    if (raw) {
       router.replace("/workstation/startup");
     } else {
       router.replace("/workstation/login");
     }
-  }, [isPending, session, router]);
+  }, [router]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">

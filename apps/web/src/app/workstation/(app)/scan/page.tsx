@@ -192,6 +192,9 @@ export default function WorkstationScanPage() {
       try {
         const ws = new WebSocket(BRIDGE_URL);
         bridgeRef.current = ws;
+        ws.onopen = () => {
+          ws.send(JSON.stringify({ type: "identify", role: "workstation" }));
+        };
         ws.onmessage = (e) => {
           try {
             const msg = JSON.parse(e.data as string);

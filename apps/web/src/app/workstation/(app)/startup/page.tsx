@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, CheckCircle2, Globe, Lock, Radio, XCircle, Loader2, Radar } from "lucide-react";
 
-import { auth } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
@@ -23,7 +22,6 @@ type SystemCheck = {
 
 export default function StartupPage() {
   const router = useRouter();
-  const { data: session } = auth.useSession();
 
   const [checks, setChecks] = useState<SystemCheck[]>([
     { id: "camera", label: "Camera", description: "Local video capture device", icon: Camera, status: "pending" },
@@ -39,10 +37,22 @@ export default function StartupPage() {
   const runChecks = useCallback(async () => {
     setChecks((prev) => prev.map((c) => ({ ...c, status: "checking" as CheckStatus })));
 
-    updateCheck("auth", session ? "pass" : "fail");
+    const raw = localStorage.getItem("workstation_session");
+    let token: string | null = null;
+    if (raw) {
+      try {
+        token = (JSON.parse(raw) as { token: string }).token;
+      } catch {
+        token = null;
+      }
+    }
+
+    updateCheck("auth", token ? "pass" : "fail");
 
     try {
-      const res = await fetch(`${API_BASE}/api/health`, { credentials: "include" });
+      const res = await fetch(`${API_BASE}/health`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       updateCheck("api", res.ok ? "pass" : "fail");
     } catch {
       updateCheck("api", "fail");
@@ -77,7 +87,7 @@ export default function StartupPage() {
     } catch {
       updateCheck("camera", "fail");
     }
-  }, [session, updateCheck]);
+  }, [updateCheck]);
 
   useEffect(() => {
     runChecks();

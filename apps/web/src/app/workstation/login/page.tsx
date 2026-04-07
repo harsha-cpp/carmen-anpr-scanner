@@ -2,18 +2,32 @@
 
 import { Suspense, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, Lock, Mail, Monitor } from "lucide-react";
+import { Cpu, Eye, EyeOff, Lock, Monitor } from "lucide-react";
 
-import { auth } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3003";
+
+type WorkstationAuthSuccess = {
+  success: true;
+  data: {
+    workstation: { id: string; address: string; name: string; deviceId: string };
+    token: string;
+  };
+};
+
+type WorkstationAuthFailure = {
+  success: false;
+  error: string;
+};
+
 function LoginForm() {
   const router = useRouter();
 
-  const [email, setEmail] = useState("");
+  const [address, setAddress] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -24,15 +38,32 @@ function LoginForm() {
     setLoading(true);
     setError(null);
 
-    const { error: signInError } = await auth.signIn.email({ email, password });
+    try {
+      const res = await fetch(`${API_BASE}/api/workstations/auth`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address, password }),
+      });
 
-    if (signInError) {
-      setError(signInError.message || "Authentication failed. Check your credentials.");
+      const json = (await res.json()) as WorkstationAuthSuccess | WorkstationAuthFailure;
+
+      if (!res.ok || !json.success) {
+        const msg = json.success === false ? json.error : undefined;
+        setError(msg || "Authentication failed. Check your credentials.");
+        setLoading(false);
+        return;
+      }
+
+      const { workstation, token } = json.data;
+      localStorage.setItem(
+        "workstation_session",
+        JSON.stringify({ workstationId: workstation.id, address: workstation.address, name: workstation.name, token }),
+      );
+      router.push("/workstation/startup");
+    } catch {
+      setError("Network error. Please try again.");
       setLoading(false);
-      return;
     }
-
-    router.push("/workstation/startup");
   }
 
   return (
@@ -71,19 +102,19 @@ function LoginForm() {
         <div className="glass-heavy rounded-2xl p-8">
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="email" className="text-xs font-medium text-muted-foreground tracking-wide uppercase">
-                Email Address
+              <Label htmlFor="address" className="text-xs font-medium text-muted-foreground tracking-wide uppercase">
+                Workstation Address
               </Label>
               <div className="relative">
-                <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none z-10" />
+                <Cpu className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none z-10" />
                 <Input
-                  id="email"
-                  type="email"
+                  id="address"
+                  type="text"
                   required
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="officer@department.gov"
+                  autoComplete="off"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder="WS-001"
                   className="h-auto bg-input border-border pl-10 py-3 placeholder:text-muted-foreground/40 focus-visible:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary/20 focus-visible:ring-offset-0"
                 />
               </div>
@@ -102,7 +133,7 @@ function LoginForm() {
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••••"
+                  placeholder="••••••••"
                   className="h-auto bg-input border-border pl-10 pr-11 py-3 placeholder:text-muted-foreground/40 focus-visible:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary/20 focus-visible:ring-offset-0"
                 />
                 <Button

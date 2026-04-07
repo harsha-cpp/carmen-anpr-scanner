@@ -1,33 +1,44 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LogOut, Monitor } from "lucide-react";
 
-import { auth } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
-type UserWithRole = {
-  role?: "admin" | "operator" | "scanner";
+type WorkstationSession = {
+  workstationId: string;
+  address: string;
+  name: string;
+  token: string;
 };
 
 export default function WorkstationLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { data: session, isPending } = auth.useSession();
+  const [session, setSession] = useState<WorkstationSession | null>(null);
+  const [isPending, setIsPending] = useState(true);
 
   useEffect(() => {
-    if (!isPending && !session) {
+    const raw = localStorage.getItem("workstation_session");
+    if (!raw) {
       router.push("/workstation/login");
       return;
     }
-    if (!isPending && session) {
-      const role = (session.user as typeof session.user & UserWithRole).role;
-      if (role !== "scanner" && role !== "admin" && role !== "operator") {
-        router.push("/portal/dashboard");
-      }
+    try {
+      const parsed = JSON.parse(raw) as WorkstationSession;
+      setSession(parsed);
+      setIsPending(false);
+    } catch {
+      localStorage.removeItem("workstation_session");
+      router.push("/workstation/login");
     }
-  }, [isPending, session, router]);
+  }, [router]);
+
+  function handleSignOut() {
+    localStorage.removeItem("workstation_session");
+    router.push("/workstation/login");
+  }
 
   if (isPending || !session) {
     return (
@@ -40,11 +51,6 @@ export default function WorkstationLayout({ children }: { children: React.ReactN
         </div>
       </div>
     );
-  }
-
-  async function handleSignOut() {
-    await auth.signOut();
-    router.push("/workstation/login");
   }
 
   return (
@@ -60,7 +66,7 @@ export default function WorkstationLayout({ children }: { children: React.ReactN
           </div>
           <span className="font-bold tracking-[0.15em] text-sm text-foreground">Workstation</span>
           <span className="text-xs text-muted-foreground/50 font-mono hidden sm:inline">
-            {session.user.name}
+            {session.address}
           </span>
         </div>
 

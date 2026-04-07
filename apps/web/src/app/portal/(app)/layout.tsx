@@ -120,7 +120,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Analytics", icon: BarChart3, href: "/portal/analytics" },
   { label: "Watchlist", icon: ListChecks, href: "/portal/watchlist" },
   { label: "Devices", icon: HardDrive, href: "/portal/devices" },
-  { label: "Workstation", icon: Monitor, href: "/workstation/scan" },
+  { label: "Workstations", icon: Monitor, href: "/portal/workstations" },
   { label: "Settings", icon: Settings, href: "/portal/settings" },
 ];
 
