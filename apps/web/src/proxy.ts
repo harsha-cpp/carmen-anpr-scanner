@@ -8,7 +8,6 @@ const API_BASE =
 const PUBLIC_PATHS = [
   "/_next",
   "/api",
-  "/anpr",
   "/fonts",
   "/favicon.ico",
 ];
@@ -73,8 +72,7 @@ export async function proxy(req: NextRequest) {
 
   const token = getSessionCookie(req);
 
-  // Scanner login is always accessible — lets users switch sessions
-  if (pathname.startsWith("/scanner/login")) {
+  if (pathname.startsWith("/workstation/login")) {
     return NextResponse.next();
   }
 
@@ -83,7 +81,7 @@ export async function proxy(req: NextRequest) {
     const cookieHeader = req.headers.get("cookie") ?? "";
     const role = await fetchRole(cookieHeader);
     if (role === "scanner") {
-      return NextResponse.redirect(new URL("/scanner/scan", req.url));
+      return NextResponse.redirect(new URL("/workstation/scan", req.url));
     }
     if (role) {
       return NextResponse.redirect(new URL("/portal/dashboard", req.url));
@@ -92,8 +90,8 @@ export async function proxy(req: NextRequest) {
   }
 
   if (!token) {
-    if (pathname.startsWith("/scanner")) {
-      return NextResponse.redirect(new URL("/scanner/login", req.url));
+    if (pathname.startsWith("/workstation")) {
+      return NextResponse.redirect(new URL("/workstation/login", req.url));
     }
     const loginUrl = new URL("/portal/login", req.url);
     loginUrl.searchParams.set("next", pathname);
@@ -104,8 +102,8 @@ export async function proxy(req: NextRequest) {
   const role = await fetchRole(cookieHeader);
 
   if (!role) {
-    if (pathname.startsWith("/scanner")) {
-      return NextResponse.redirect(new URL("/scanner/login", req.url));
+    if (pathname.startsWith("/workstation")) {
+      return NextResponse.redirect(new URL("/workstation/login", req.url));
     }
     const loginUrl = new URL("/portal/login", req.url);
     loginUrl.searchParams.set("next", pathname);
@@ -113,13 +111,13 @@ export async function proxy(req: NextRequest) {
   }
 
   if (role === "scanner") {
-    if (pathname.startsWith("/scanner")) {
+    if (pathname.startsWith("/workstation")) {
       return NextResponse.next();
     }
-    return NextResponse.redirect(new URL("/scanner/scan", req.url));
+    return NextResponse.redirect(new URL("/workstation/scan", req.url));
   }
 
-  if (pathname.startsWith("/scanner")) {
+  if (pathname.startsWith("/workstation")) {
     return NextResponse.next();
   }
 

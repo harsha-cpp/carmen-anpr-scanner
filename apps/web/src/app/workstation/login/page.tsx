@@ -2,7 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, Lock, Mail, Radar } from "lucide-react";
+import { Eye, EyeOff, Lock, Mail, Monitor } from "lucide-react";
 
 import { auth } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
@@ -32,7 +32,7 @@ function LoginForm() {
       return;
     }
 
-    router.push("/scanner/scan");
+    router.push("/workstation/startup");
   }
 
   return (
@@ -58,10 +58,10 @@ function LoginForm() {
       <div className="relative w-full max-w-sm mx-auto px-4 py-12">
         <div className="text-center mb-10">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl glass glow-primary mb-5">
-            <Radar className="w-8 h-8 text-primary" strokeWidth={1.5} />
+            <Monitor className="w-8 h-8 text-primary" strokeWidth={1.5} />
           </div>
           <h1 className="text-2xl font-bold tracking-[0.2em] text-foreground uppercase">
-            Field Scanner
+            Workstation Login
           </h1>
           <p className="text-muted-foreground text-sm mt-2 tracking-wide">
             Authorized personnel only
@@ -129,7 +129,7 @@ function LoginForm() {
               disabled={loading}
               className={cn("w-full mt-1 py-3 h-auto", !loading && "glow-primary")}
             >
-              {loading ? "Authenticating…" : "Sign In"}
+              {loading ? "Authenticating\u2026" : "Sign In"}
             </Button>
           </form>
         </div>
@@ -142,7 +142,7 @@ function LoginForm() {
   );
 }
 
-export default function ScannerLoginPage() {
+export default function WorkstationLoginPage() {
   return (
     <Suspense fallback={null}>
       <LoginForm />
