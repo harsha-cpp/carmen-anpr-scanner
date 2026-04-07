@@ -185,6 +185,7 @@ interface StartMessage {
   type: "start";
   region?: string;
   continuous?: boolean;
+  workstationAddress?: string;
 }
 
 interface GetBlacklistMessage {
@@ -196,11 +197,22 @@ interface GetRecentDetectionsMessage {
   limit?: number;
 }
 
+interface ViewCameraMessage {
+  type: "viewCamera";
+  workstationAddress: string;
+}
+
+interface ListCamerasMessage {
+  type: "listCameras";
+}
+
 type ClientMessage =
   | AuthenticateMessage
   | StartMessage
   | GetBlacklistMessage
-  | GetRecentDetectionsMessage;
+  | GetRecentDetectionsMessage
+  | ViewCameraMessage
+  | ListCamerasMessage;
 
 // ── Vehicle API types ────────────────────────────────────────────────────────
 
@@ -231,6 +243,11 @@ interface VehicleApiResponse {
 
 // ── Connection handler ───────────────────────────────────────────────────────
 
+const cameraViewers = new Map<string, Set<WebSocket>>();
+const latestFrames = new Map<string, Buffer>();
+const wsToWorkstation = new Map<WebSocket, string>();
+const wsToViewerAddresses = new Map<WebSocket, Set<string>>();
+
 wss.on("connection", (ws: WebSocket) => {
   logger.info("client connected");
 
@@ -241,6 +258,7 @@ wss.on("connection", (ws: WebSocket) => {
   let privileged = false;
   let processing = false;
   let queuedFrame: Buffer | null = null;
+  let workstationAddress = "";
   const lastSeen = new Map<string, number>();
 
   ws.on("message", async (data: RawData, isBinary: boolean) => {
@@ -284,7 +302,14 @@ wss.on("connection", (ws: WebSocket) => {
           started = true;
           region = ((msg as StartMessage).region || "sas").toLowerCase();
           continuous = Boolean((msg as StartMessage).continuous);
-          logger.info({ region, continuous }, "session started");
+          const wsAddress = typeof (msg as StartMessage).workstationAddress === "string"
+            ? String((msg as StartMessage).workstationAddress)
+            : "";
+          workstationAddress = wsAddress;
+          if (workstationAddress) {
+            wsToWorkstation.set(ws, workstationAddress);
+          }
+          logger.info({ region, continuous, workstationAddress }, "session started");
           ws.send(JSON.stringify({ type: "ready" }));
         } else if (msg.type === "getBlacklist") {
           if (!privileged) {
@@ -385,6 +410,33 @@ wss.on("connection", (ws: WebSocket) => {
               }),
             );
           }
+        } else if (msg.type === "viewCamera") {
+          const addr = (msg as ViewCameraMessage).workstationAddress;
+          if (!addr) return;
+          let viewers = cameraViewers.get(addr);
+          if (!viewers) {
+            viewers = new Set();
+            cameraViewers.set(addr, viewers);
+          }
+          viewers.add(ws);
+          let viewedAddresses = wsToViewerAddresses.get(ws);
+          if (!viewedAddresses) {
+            viewedAddresses = new Set();
+            wsToViewerAddresses.set(ws, viewedAddresses);
+          }
+          viewedAddresses.add(addr);
+          const hasActive = latestFrames.has(addr);
+          ws.send(JSON.stringify({ type: "cameraStatus", workstationAddress: addr, active: hasActive }));
+          if (hasActive) {
+            const frame = latestFrames.get(addr);
+            if (frame) ws.send(frame);
+          }
+        } else if (msg.type === "listCameras") {
+          const cameras: Array<{ workstationAddress: string; active: boolean }> = [];
+          for (const addr of latestFrames.keys()) {
+            cameras.push({ workstationAddress: addr, active: true });
+          }
+          ws.send(JSON.stringify({ type: "cameraList", cameras }));
         }
       } catch {
         // Ignore malformed JSON
@@ -407,6 +459,18 @@ wss.on("connection", (ws: WebSocket) => {
       const jpegBuffer = queuedFrame;
       queuedFrame = null;
       logger.info({ bytes: jpegBuffer.length }, "frame received");
+
+      if (workstationAddress) {
+        latestFrames.set(workstationAddress, jpegBuffer);
+        const viewers = cameraViewers.get(workstationAddress);
+        if (viewers) {
+          for (const viewer of viewers) {
+            if (viewer.readyState === WebSocket.OPEN) {
+              viewer.send(jpegBuffer);
+            }
+          }
+        }
+      }
 
       const t0 = Date.now();
       try {
@@ -494,6 +558,35 @@ wss.on("connection", (ws: WebSocket) => {
     if (stopped) return;
     stopped = true;
     queuedFrame = null;
+
+    const wsAddr = wsToWorkstation.get(ws);
+    if (wsAddr) {
+      wsToWorkstation.delete(ws);
+      latestFrames.delete(wsAddr);
+      const viewers = cameraViewers.get(wsAddr);
+      if (viewers) {
+        const offlineMsg = JSON.stringify({ type: "cameraOffline", workstationAddress: wsAddr });
+        for (const viewer of viewers) {
+          if (viewer.readyState === WebSocket.OPEN) {
+            viewer.send(offlineMsg);
+          }
+        }
+        cameraViewers.delete(wsAddr);
+      }
+    }
+
+    const viewedAddresses = wsToViewerAddresses.get(ws);
+    if (viewedAddresses) {
+      for (const addr of viewedAddresses) {
+        const viewers = cameraViewers.get(addr);
+        if (viewers) {
+          viewers.delete(ws);
+          if (viewers.size === 0) cameraViewers.delete(addr);
+        }
+      }
+      wsToViewerAddresses.delete(ws);
+    }
+
     logger.info("client disconnected");
   };
 

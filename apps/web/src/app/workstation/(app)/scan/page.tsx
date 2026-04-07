@@ -371,7 +371,8 @@ export default function WorkstationScanPage() {
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "start", region, continuous: true }));
+      const session = JSON.parse(localStorage.getItem("workstation_session") || "{}") as Record<string, unknown>;
+      ws.send(JSON.stringify({ type: "start", region, continuous: true, workstationAddress: typeof session.address === "string" ? session.address : "" }));
     };
 
     ws.onmessage = (e) => {

@@ -1,64 +1,37 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Camera,
   Wifi,
   WifiOff,
   Clock,
-  MonitorSmartphone,
   Loader2,
   AlertCircle,
   RefreshCw,
-  Circle,
+  MonitorSmartphone,
 } from "lucide-react";
+
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:3002";
 
 interface Workstation {
   id: string;
+  address: string;
   deviceId: string;
   name: string;
   description: string | null;
   status: "PENDING" | "ACTIVE" | "OFFLINE" | "DISABLED";
   lastSeenAt: string | null;
   createdAt: string;
-}
-
-interface Tablet {
-  id: string;
-  deviceId: string;
-  name: string;
-  status: "PENDING" | "ACTIVE" | "OFFLINE" | "DISABLED";
-  lastSeenAt: string | null;
-}
-
-interface DevicePairing {
-  id: string;
-  workstationId: string;
-  tabletId: string;
-  unpairedAt: string | null;
-}
-
-interface DevicesData {
-  workstations: Workstation[];
-  tablets: Tablet[];
-  pairings: DevicePairing[];
+  _count?: { pairings: number };
 }
 
 type ApiResp<T> = { success: true; data: T } | { success: false; error: string };
-
-function statusConfig(status: string) {
-  const map: Record<string, { label: string; color: string; dotColor: string; icon: typeof Wifi }> = {
-    ACTIVE: { label: "Online", color: "text-success", dotColor: "bg-success", icon: Wifi },
-    OFFLINE: { label: "Offline", color: "text-destructive", dotColor: "bg-destructive", icon: WifiOff },
-    PENDING: { label: "Pending", color: "text-warning", dotColor: "bg-warning", icon: Clock },
-    DISABLED: { label: "Disabled", color: "text-muted-foreground", dotColor: "bg-muted-foreground", icon: WifiOff },
-  };
-  return map[status] ?? map.OFFLINE;
-}
 
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return "Never";
@@ -71,22 +44,151 @@ function timeAgo(dateStr: string | null): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+interface CameraFeedProps {
+  workstationAddress: string;
+  wsUrl?: string;
+  isActive: boolean;
+}
+
+function CameraFeed({ workstationAddress, wsUrl = WS_URL, isActive }: CameraFeedProps) {
+  const [frameUrl, setFrameUrl] = useState<string | null>(null);
+  const [isLive, setIsLive] = useState(false);
+  const [connError, setConnError] = useState(false);
+  const latestFrameUrl = useRef<string | null>(null);
+  const shouldReconnect = useRef(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!isActive) {
+      shouldReconnect.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (wsRef.current) {
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      setIsLive(false);
+      setConnError(false);
+      return;
+    }
+
+    shouldReconnect.current = true;
+
+    function connect() {
+      if (!shouldReconnect.current) return;
+      try {
+        const ws = new WebSocket(wsUrl);
+        ws.binaryType = "arraybuffer";
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          setConnError(false);
+          ws.send(JSON.stringify({ type: "viewCamera", workstationAddress }));
+        };
+
+        ws.onmessage = (event) => {
+          if (event.data instanceof ArrayBuffer) {
+            const blob = new Blob([event.data], { type: "image/jpeg" });
+            const url = URL.createObjectURL(blob);
+            if (latestFrameUrl.current) URL.revokeObjectURL(latestFrameUrl.current);
+            latestFrameUrl.current = url;
+            setFrameUrl(url);
+            setIsLive(true);
+          } else if (typeof event.data === "string") {
+            const msg = JSON.parse(event.data) as { type: string; active?: boolean };
+            if (msg.type === "cameraOffline") setIsLive(false);
+            else if (msg.type === "cameraStatus") setIsLive(msg.active ?? false);
+          }
+        };
+
+        ws.onerror = () => {
+          setConnError(true);
+          setIsLive(false);
+        };
+
+        ws.onclose = () => {
+          setIsLive(false);
+          if (shouldReconnect.current) {
+            timerRef.current = setTimeout(connect, 3000);
+          }
+        };
+      } catch {
+        setConnError(true);
+      }
+    }
+
+    connect();
+
+    return () => {
+      shouldReconnect.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (wsRef.current) {
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      if (latestFrameUrl.current) {
+        URL.revokeObjectURL(latestFrameUrl.current);
+        latestFrameUrl.current = null;
+      }
+    };
+  }, [isActive, workstationAddress, wsUrl]);
+
+  if (!isActive) {
+    return (
+      <div className="aspect-video bg-card/30 flex items-center justify-center">
+        <Camera className="h-12 w-12 text-muted-foreground/20" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="aspect-video bg-card/30 relative overflow-hidden">
+      {frameUrl ? (
+        <img
+          src={frameUrl}
+          alt={`Live feed — ${workstationAddress}`}
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center">
+          {connError ? (
+            <div className="flex flex-col items-center gap-2">
+              <AlertCircle className="h-8 w-8 text-destructive/60" />
+              <p className="text-xs text-destructive/80">Connection error</p>
+            </div>
+          ) : (
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground/40" />
+          )}
+        </div>
+      )}
+      {isLive && (
+        <div className="absolute top-3 left-3 flex items-center gap-1.5 glass rounded-full px-2.5 py-1">
+          <div className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
+          <span className="text-xs font-medium text-success">LIVE</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function CamerasPage() {
-  const [data, setData] = useState<DevicesData | null>(null);
+  const [workstations, setWorkstations] = useState<Workstation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchDevices = useCallback(async (silent = false) => {
+  const fetchWorkstations = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     setError(null);
     try {
-      const resp = await api.get<ApiResp<DevicesData>>("/api/devices");
-      if (resp.success) setData(resp.data);
+      const resp = await api.get<ApiResp<{ workstations: Workstation[] }>>("/api/workstations");
+      if (resp.success) setWorkstations(resp.data.workstations);
       else setError(resp.error);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load devices");
+      setError(e instanceof Error ? e.message : "Failed to load workstations");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -94,37 +196,27 @@ export default function CamerasPage() {
   }, []);
 
   useEffect(() => {
-    void fetchDevices();
-    const id = setInterval(() => void fetchDevices(true), 30000);
+    void fetchWorkstations();
+    const id = setInterval(() => void fetchWorkstations(true), 30000);
     return () => clearInterval(id);
-  }, [fetchDevices]);
-
-  const workstations = data?.workstations ?? [];
-  const pairings = data?.pairings ?? [];
-  const tablets = data?.tablets ?? [];
+  }, [fetchWorkstations]);
 
   const activeCount = workstations.filter((w) => w.status === "ACTIVE").length;
-  const offlineCount = workstations.filter((w) => w.status === "OFFLINE").length;
-
-  function getLinkedTablet(ws: Workstation): Tablet | undefined {
-    const pairing = pairings.find((p) => p.workstationId === ws.id && !p.unpairedAt);
-    if (!pairing) return undefined;
-    return tablets.find((t) => t.id === pairing.tabletId);
-  }
+  const offlineCount = workstations.filter((w) => w.status !== "ACTIVE").length;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-foreground">Cameras</h1>
+          <h1 className="text-2xl font-semibold text-foreground">Live Cameras</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Live workstation feed status and camera health monitoring
+            Real-time video feeds from active workstations
           </p>
         </div>
         <Button
           type="button"
           variant="outline"
-          onClick={() => void fetchDevices(true)}
+          onClick={() => void fetchWorkstations(true)}
           disabled={refreshing}
           className={cn(
             "flex items-center gap-2 glass glass-hover text-muted-foreground hover:text-foreground",
@@ -196,44 +288,52 @@ export default function CamerasPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {workstations.map((ws) => {
-            const cfg = statusConfig(ws.status);
-            const StatusIcon = cfg.icon;
-            const linkedTablet = getLinkedTablet(ws);
+            const isActive = ws.status === "ACTIVE";
+            const statusVariant: "success" | "warning" | "destructive" | "outline" =
+              ws.status === "ACTIVE"
+                ? "success"
+                : ws.status === "PENDING"
+                  ? "warning"
+                  : ws.status === "DISABLED"
+                    ? "outline"
+                    : "destructive";
+            const statusLabel =
+              ws.status === "ACTIVE"
+                ? "Online"
+                : ws.status === "PENDING"
+                  ? "Pending"
+                  : ws.status === "DISABLED"
+                    ? "Disabled"
+                    : "Offline";
+            const StatusIcon =
+              ws.status === "ACTIVE" ? Wifi : ws.status === "PENDING" ? Clock : WifiOff;
 
             return (
               <div key={ws.id} className="glass rounded-xl overflow-hidden glass-hover transition-all">
-                <div className="aspect-video bg-card/30 flex items-center justify-center relative">
-                  <Camera className="h-12 w-12 text-muted-foreground/20" />
-                  <div className="absolute top-3 right-3 flex items-center gap-1.5 glass rounded-full px-2.5 py-1">
-                    <Circle className={cn("h-2 w-2 fill-current", cfg.color)} />
-                    <span className={cn("text-xs font-medium", cfg.color)}>{cfg.label}</span>
+                <div className="relative">
+                  <CameraFeed workstationAddress={ws.address} isActive={isActive} />
+                  <div className="absolute top-3 right-3">
+                    <Badge variant={statusVariant} className="gap-1.5">
+                      <StatusIcon className="h-3 w-3" />
+                      {statusLabel}
+                    </Badge>
                   </div>
-                  {ws.status === "ACTIVE" && (
-                    <div className="absolute bottom-3 left-3 flex items-center gap-1.5 glass rounded-full px-2.5 py-1">
-                      <div className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
-                      <span className="text-xs text-success">Live</span>
-                    </div>
-                  )}
                 </div>
 
                 <div className="px-4 py-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-medium text-foreground truncate">{ws.name}</h3>
-                    <StatusIcon className={cn("h-4 w-4 shrink-0", cfg.color)} />
-                  </div>
-
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                    <span className="font-mono">{ws.deviceId}</span>
+                    <span className="text-xs font-mono text-muted-foreground ml-2 shrink-0">{ws.address}</span>
                   </div>
 
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground">Last seen: {timeAgo(ws.lastSeenAt)}</span>
-                    {linkedTablet && (
+                    {ws._count?.pairings ? (
                       <span className="flex items-center gap-1 text-accent">
                         <MonitorSmartphone className="h-3 w-3" />
-                        {linkedTablet.name}
+                        {ws._count.pairings} paired
                       </span>
-                    )}
+                    ) : null}
                   </div>
 
                   {ws.description && (
