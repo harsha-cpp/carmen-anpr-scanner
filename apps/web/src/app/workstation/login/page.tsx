@@ -2,7 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Cpu, Eye, EyeOff, Lock, Monitor } from "lucide-react";
+import { Cpu, Eye, EyeOff, Lock } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -88,9 +88,6 @@ function LoginForm() {
 
       <div className="relative w-full max-w-sm mx-auto px-4 py-12">
         <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl glass glow-primary mb-5">
-            <Monitor className="w-8 h-8 text-primary" strokeWidth={1.5} />
-          </div>
           <h1 className="text-2xl font-bold tracking-[0.2em] text-foreground uppercase">
             Workstation Login
           </h1>
