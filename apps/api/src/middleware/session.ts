@@ -1,28 +1,64 @@
 import type { MiddlewareHandler } from "hono";
 import type { AppBindings } from "../types.js";
 import { auth } from "../lib/auth.js";
+import { prisma } from "../lib/prisma.js";
 import { fail } from "../utils/json.js";
+import { hashToken } from "../utils/crypto.js";
 
 export const sessionContext: MiddlewareHandler<AppBindings> = async (c, next) => {
   const session = await auth.api.getSession({
     headers: c.req.raw.headers,
   });
 
-  c.set(
-    "user",
-    session?.user
-      ? {
-          id: session.user.id,
-          email: session.user.email,
-          name: session.user.name,
-          username: session.user.username ?? null,
-          role: session.user.role ?? "operator",
-        }
-      : null,
-  );
-  c.set("session", session?.session ?? null);
-  c.set("device", null);
+  if (session?.user) {
+    c.set("user", {
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+      username: session.user.username ?? null,
+      role: session.user.role ?? "operator",
+    });
+    c.set("session", session.session);
+    c.set("device", null);
+    return next();
+  }
 
+  const deviceTokenHeader = c.req.header("x-device-token");
+  if (deviceTokenHeader) {
+    const tokenHash = hashToken(deviceTokenHeader);
+    const deviceToken = await prisma.deviceToken.findFirst({
+      where: { tokenHash, revokedAt: null },
+      include: { workstation: true },
+    });
+
+    if (deviceToken?.workstation) {
+      c.set("user", {
+        id: `device:${deviceToken.workstation.id}`,
+        email: "",
+        name: deviceToken.workstation.name,
+        username: deviceToken.workstation.address,
+        role: "operator",
+      });
+      c.set("session", null);
+      c.set("device", {
+        token: {
+          id: deviceToken.id,
+          label: deviceToken.label,
+          deviceType: deviceToken.deviceType,
+          workstationId: deviceToken.workstationId,
+          tabletId: deviceToken.tabletId,
+        },
+        workstation: deviceToken.workstation,
+        tablet: null,
+        deviceKey: deviceToken.workstation.deviceId,
+      });
+      return next();
+    }
+  }
+
+  c.set("user", null);
+  c.set("session", null);
+  c.set("device", null);
   await next();
 };
 

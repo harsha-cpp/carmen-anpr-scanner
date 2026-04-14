@@ -10,16 +10,23 @@ export class ApiError extends Error {
   }
 }
 
+function getDeviceToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("tablet_device_token");
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
   const url = `${API_BASE}${path}`;
+  const token = getDeviceToken();
   const res = await fetch(url, {
     ...options,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      ...(token ? { "x-device-token": token } : {}),
       ...options.headers,
     },
   });

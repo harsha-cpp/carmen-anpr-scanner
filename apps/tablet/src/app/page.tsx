@@ -14,6 +14,7 @@ import { useWorkstationSocket } from "@/hooks/useWorkstationSocket";
 const STORAGE_KEY = "tablet_ws_url";
 const WORKSTATION_KEY = "tablet_workstation";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3003";
+const BRIDGE_BASE = process.env.NEXT_PUBLIC_BRIDGE_URL ?? "";
 
 type ConnectionPhase = "idle" | "connecting" | "connected" | "failed";
 
@@ -58,6 +59,22 @@ export default function PairingPage() {
   }, [socket.connected, socket.error, wsUrl]);
 
   useEffect(() => {
+    if (phase !== "connecting") return;
+    const timeout = setTimeout(() => {
+      if (!socket.connected) {
+        setWsUrl(null);
+        setPhase("failed");
+        setPairError("Connection timed out. Please try again.");
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(WORKSTATION_KEY);
+        localStorage.removeItem("tablet_workstation_id");
+        localStorage.removeItem("tablet_device_token");
+      }
+    }, 5000);
+    return () => clearTimeout(timeout);
+  }, [phase, socket.connected]);
+
+  useEffect(() => {
     if (socket.connected && socket.healthReport) {
       router.push("/dashboard");
     }
@@ -94,6 +111,7 @@ export default function PairingPage() {
         data?: {
           workstation: { id: string; address: string; name: string };
           wsPort: number;
+          token: string;
         };
       };
 
@@ -104,9 +122,10 @@ export default function PairingPage() {
         return;
       }
 
-      const { workstation, wsPort } = json.data;
-      const url = `ws://localhost:${wsPort}`;
+      const { workstation, wsPort, token } = json.data;
+      const url = BRIDGE_BASE || `ws://localhost:${wsPort}`;
       localStorage.setItem(STORAGE_KEY, url);
+      if (token) localStorage.setItem("tablet_device_token", token);
       localStorage.setItem(
         WORKSTATION_KEY,
         JSON.stringify({
@@ -133,6 +152,7 @@ export default function PairingPage() {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(WORKSTATION_KEY);
     localStorage.removeItem("tablet_workstation_id");
+    localStorage.removeItem("tablet_device_token");
   }
 
   const isConnecting = pairing || phase === "connecting";

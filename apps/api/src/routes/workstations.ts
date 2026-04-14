@@ -233,6 +233,16 @@ workstationRoutes.post("/api/workstations/tablet-pair", async (c) => {
   const valid = await bcrypt.compare(password, ws.passwordHash);
   if (!valid) return fail(c, 401, "Invalid credentials.");
 
+  const issued = issueDeviceToken();
+  await prisma.deviceToken.create({
+    data: {
+      tokenHash: issued.tokenHash,
+      label: "tablet-pair",
+      deviceType: "WORKSTATION",
+      workstationId: ws.id,
+    },
+  });
+
   return ok(c, {
     workstation: {
       id: ws.id,
@@ -240,5 +250,6 @@ workstationRoutes.post("/api/workstations/tablet-pair", async (c) => {
       name: ws.name,
     },
     wsPort: 8089,
+    token: issued.rawToken,
   });
 });
