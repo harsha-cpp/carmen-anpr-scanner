@@ -129,7 +129,7 @@ export function AddToHitlistModal({
   return (
     <div className="fixed inset-0 z-50">
       <div
-        className="absolute inset-0 bg-background/70 backdrop-blur-sm pointer-events-none"
+        className="absolute inset-0 bg-background/80 pointer-events-none"
         aria-hidden="true"
       />
       <div
@@ -149,7 +149,7 @@ export function AddToHitlistModal({
       >
         <div
           ref={contentRef}
-          className="relative glass-heavy rounded-2xl p-5 w-[340px] max-w-[calc(100vw-2rem)] shadow-2xl border border-border/60"
+          className="relative rounded-2xl p-5 w-[340px] max-w-[calc(100vw-2rem)] shadow-2xl border border-border/60 bg-[oklch(0.12_0.005_260/0.95)]"
         >
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2.5">
@@ -186,7 +186,7 @@ export function AddToHitlistModal({
         ) : (
           <>
             {error && (
-              <div className="glass rounded-xl p-2.5 border border-destructive/30 bg-destructive/5 mb-3">
+              <div className="rounded-xl p-2.5 border border-destructive/30 bg-destructive/5 mb-3">
                 <p className="text-xs text-destructive">{error}</p>
               </div>
             )}
@@ -214,7 +214,8 @@ export function AddToHitlistModal({
                     }}
                     disabled={submitting}
                     className={cn(
-                      "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl glass text-left transition-all touch-manipulation",
+                      "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all touch-manipulation",
+                      "bg-[--color-glass] border border-[--color-glass-border]",
                       "hover:border-primary/40 hover:bg-primary/5",
                       selectedId === h.id && "border-primary/50 bg-primary/10",
                       "disabled:opacity-50 disabled:pointer-events-none",
@@ -238,7 +239,7 @@ export function AddToHitlistModal({
                     type="button"
                     onClick={() => setShowCreate(true)}
                     disabled={submitting}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl glass text-left transition-all hover:border-muted-foreground/30 hover:bg-accent/5 disabled:opacity-50 disabled:pointer-events-none touch-manipulation"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all touch-manipulation bg-[--color-glass] border border-[--color-glass-border] hover:border-muted-foreground/30 hover:bg-accent/5 disabled:opacity-50 disabled:pointer-events-none"
                   >
                     <Plus className="h-4 w-4 text-muted-foreground shrink-0" />
                     <span className="text-sm text-muted-foreground">
@@ -246,7 +247,7 @@ export function AddToHitlistModal({
                     </span>
                   </button>
                 ) : (
-                  <div className="glass rounded-xl p-3 space-y-2">
+                  <div className="rounded-xl p-3 space-y-2 bg-[--color-glass] border border-[--color-glass-border]">
                     <Input
                       placeholder="Hitlist name…"
                       value={newName}
