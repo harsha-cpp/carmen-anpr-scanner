@@ -75,6 +75,24 @@ export default function PairingPage() {
   }, [phase, socket.connected]);
 
   useEffect(() => {
+    if (phase !== "connected" || socket.healthReport) return;
+    const timeout = setTimeout(() => {
+      if (!socket.healthReport) {
+        setWsUrl(null);
+        setPhase("failed");
+        setPairError(
+          "Connected to bridge but workstation is not responding. Check that the workstation agent is running.",
+        );
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(WORKSTATION_KEY);
+        localStorage.removeItem("tablet_workstation_id");
+        localStorage.removeItem("tablet_device_token");
+      }
+    }, 8000);
+    return () => clearTimeout(timeout);
+  }, [phase, socket.healthReport]);
+
+  useEffect(() => {
     if (socket.connected && socket.healthReport) {
       router.push("/dashboard");
     }
