@@ -12,11 +12,13 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/api/prisma apps/api/prisma
 COPY apps/web/package.json apps/web/package.json
+COPY apps/tablet/package.json apps/tablet/package.json
 COPY apps/ws-server/package.json apps/ws-server/package.json
 
 RUN pnpm install --no-frozen-lockfile \
   --filter @adarecog/api \
   --filter @adarecog/web \
+  --filter @adarecog/tablet \
   --filter @adarecog/ws-server
 
 COPY . .
