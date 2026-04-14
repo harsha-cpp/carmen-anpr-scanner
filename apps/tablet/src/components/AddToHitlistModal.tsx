@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, ListPlus, Loader2, Plus, Shield, X } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -56,6 +56,7 @@ export function AddToHitlistModal({
     setNewName("");
     setError(null);
     setSuccess(false);
+    setSubmitting(false);
     setLoadingHitlists(true);
     api
       .get<ApiResp<Hitlist[]>>("/api/hitlists")
@@ -121,17 +122,30 @@ export function AddToHitlistModal({
     }
   }
 
+  const contentRef = useRef<HTMLDivElement>(null);
+
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <button
-        type="button"
-        aria-label="Close modal"
-        className="absolute inset-0 bg-background/70 backdrop-blur-sm cursor-default"
-        onClick={onClose}
-      />
-      <div className="relative glass-heavy rounded-2xl p-5 w-[340px] max-w-[calc(100vw-2rem)] shadow-2xl border border-border/60 z-10">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Add ${plate} to hitlist`}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm touch-manipulation"
+      tabIndex={-1}
+      onClick={(e) => {
+        if (contentRef.current && !contentRef.current.contains(e.target as Node)) {
+          onClose();
+        }
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
+      }}
+    >
+      <div
+        ref={contentRef}
+        className="relative glass-heavy rounded-2xl p-5 w-[340px] max-w-[calc(100vw-2rem)] shadow-2xl border border-border/60"
+      >
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-primary/15 border border-primary/25 flex items-center justify-center shrink-0">
@@ -195,7 +209,7 @@ export function AddToHitlistModal({
                     }}
                     disabled={submitting}
                     className={cn(
-                      "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl glass text-left transition-all",
+                      "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl glass text-left transition-all touch-manipulation",
                       "hover:border-primary/40 hover:bg-primary/5",
                       selectedId === h.id && "border-primary/50 bg-primary/10",
                       "disabled:opacity-50 disabled:pointer-events-none",
@@ -219,7 +233,7 @@ export function AddToHitlistModal({
                     type="button"
                     onClick={() => setShowCreate(true)}
                     disabled={submitting}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl glass text-left transition-all hover:border-muted-foreground/30 hover:bg-accent/5 disabled:opacity-50 disabled:pointer-events-none"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl glass text-left transition-all hover:border-muted-foreground/30 hover:bg-accent/5 disabled:opacity-50 disabled:pointer-events-none touch-manipulation"
                   >
                     <Plus className="h-4 w-4 text-muted-foreground shrink-0" />
                     <span className="text-sm text-muted-foreground">
